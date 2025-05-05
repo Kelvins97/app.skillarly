@@ -1,35 +1,34 @@
-const express = require('express');
-const axios = require('axios');
-const dotenv = require('dotenv');
-const cors = require('cors');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const supabase = require('./supabase');
-const scraper = require('./scraper');
-const { sendEmail } = require('./email');
-const { Configuration, OpenAIApi } = require('openai');
+import express from 'express';
+import axios from 'axios';
+import dotenv from 'dotenv';
+import cors from 'cors';
+import stripePackage from 'stripe';
+import supabase from './supabase.js';
+import scraper from './scraper.js';
+import { sendEmail } from './email.js';
+import { Configuration, OpenAIApi } from 'openai';
+import pg from 'pg';
+import Stripe from 'stripe';
+import rateLimit from 'express-rate-limit';
+import fetch from 'node-fetch';
 
+// Initialize modules with config
 dotenv.config();
 const app = express();
-app.use(cors());
-app.use(express.json());
+const stripe = stripePackage(process.env.STRIPE_SECRET_KEY);
+const { Pool } = pg;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+// OpenAI configuration
 const openai = new OpenAIApi(new Configuration({
   apiKey: process.env.OPENAI_API_KEY
 }));
 
-import pg from 'pg';
-import Stripe from 'stripe';
-import rateLimit from 'express-rate-limit';
-
-
-dotenv.config();
+// Middleware
 app.use(cors());
 app.use(express.json());
-const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-
-// 🔐 Rate limiter for /recommendations
+// Rate limiter setup
 const recommendationsLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
