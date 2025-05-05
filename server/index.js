@@ -18,7 +18,7 @@ const openai = new OpenAIApi(new Configuration({
 }));
 
 
-import express from 'express';
+//import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import pg from 'pg';
