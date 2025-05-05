@@ -17,14 +17,10 @@ const openai = new OpenAIApi(new Configuration({
   apiKey: process.env.OPENAI_API_KEY
 }));
 
-
-/*import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';*/
 import pg from 'pg';
 import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
-import fetch from 'node-fetch';
+
 
 dotenv.config();
 app.use(cors());
