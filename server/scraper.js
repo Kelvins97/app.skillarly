@@ -1,6 +1,6 @@
-const puppeteer = require('puppeteer');
+import puppeteer from 'puppeteer';
 
-module.exports = async function scrapeLinkedInProfile(profileUrl) {
+export default async function scrapeLinkedInProfile(profileUrl) {
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
 
@@ -15,3 +15,4 @@ module.exports = async function scrapeLinkedInProfile(profileUrl) {
 
   return { name, skills, certifications };
 };
+
