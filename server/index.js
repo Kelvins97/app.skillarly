@@ -359,9 +359,6 @@ app.get('/user-info', async (req, res) => {
   }
 });
 
-
-//const fetch = require('node-fetch');
-
 //Remotive jobs
 app.post('/jobs/remotive', async (req, res) => {
   const { skills } = req.body;
