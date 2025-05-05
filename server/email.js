@@ -1,10 +1,10 @@
-const axios = require('axios');
-const { generateRecommendationEmail } = require('./templates/recommendationEmail');
+import axios from 'axios';
+import { generateRecommendationEmail } from './templates/recommendationEmail.js';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = 'Skillarly <onboarding@resend.dev>';
 
-async function sendEmail(to, name, { primarySkill, email, courses, certifications, jobs }) {
+ export async function sendEmail(to, name, { primarySkill, email, courses, certifications, jobs }) {
   const html = generateRecommendationEmail({
     firstName: name,
     primarySkill,
@@ -33,4 +33,4 @@ async function sendEmail(to, name, { primarySkill, email, courses, certification
   }
 }
 
-module.exports = { sendEmail };
+
