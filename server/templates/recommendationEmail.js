@@ -1,4 +1,4 @@
-function generateRecommendationEmail({ firstName, primarySkill, email, courses = [], certifications = [], jobs = [] }) {
+export function generateRecommendationEmail({ firstName, primarySkill, email, courses = [], certifications = [], jobs = [] }) {
     return `
     <!DOCTYPE html>
     <html>
@@ -76,5 +76,5 @@ function generateRecommendationEmail({ firstName, primarySkill, email, courses =
     </html>`;
   }
   
-  module.exports = { generateRecommendationEmail };
+  
   
