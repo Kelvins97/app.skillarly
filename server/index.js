@@ -6,7 +6,7 @@ import stripePackage from 'stripe';
 import supabase from './supabase.js';
 import scraper from './scraper.js';
 import { sendEmail } from './email.js';
-import { Configuration, OpenAIApi } from 'openai';
+import OpenAI from 'openai';
 import pg from 'pg';
 import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
@@ -23,6 +23,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const openai = new OpenAIApi(new Configuration({
   apiKey: process.env.OPENAI_API_KEY
 }));
+
 
 // Middleware
 app.use(cors());
