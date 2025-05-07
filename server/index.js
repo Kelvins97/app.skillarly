@@ -124,9 +124,9 @@ function verifyAuthToken(req, res, next) {
 app.get('/go', (req, res) => {
   const ref = req.get('Referrer') || '';
   if (ref.includes('linkedin.com/in/')) {
-    return res.redirect(`/mobile.html?profile=${encodeURIComponent(ref)}`);
+    return res.redirect(`/index.html?profile=${encodeURIComponent(ref)}`);
   }
-  return res.redirect('/mobile.html');
+  return res.redirect('/index.html');
 });
 
 // Scrape LinkedIn profile and save data - protected with auth
