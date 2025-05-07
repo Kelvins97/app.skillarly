@@ -87,9 +87,9 @@ async function sendMpesaPush({ amount, phone, email }) {
 app.get('/go', (req, res) => {
   const ref = req.get('Referrer') || '';
   if (ref.includes('linkedin.com/in/')) {
-    return res.redirect(`/mobile.html?profile=${encodeURIComponent(ref)}`);
+    return res.redirect(`https://skillarly.vercel.app/mobile.html?profile=${encodeURIComponent(ref)}`);
   }
-  return res.redirect('/mobile.html');
+  return res.redirect('https://skillarly.vercel.app/mobile.html');
 });
 
 // Scrape LinkedIn profile and save data
