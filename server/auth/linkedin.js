@@ -96,3 +96,14 @@ function generateSecureToken(user) {
     timestamp: Date.now()
   })).toString('base64');
 }
+
+// LinkedIn OAuth routes
+router.get('/auth/linkedin', passport.authenticate('linkedin'));
+
+router.get('/auth/linkedin/callback',
+  passport.authenticate('linkedin', { failureRedirect: '/login-failed' }),
+  (req, res) => { /* ... */ }
+);
+
+// Export the router
+module.exports = router; // 🟢 Critical!
