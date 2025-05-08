@@ -556,6 +556,11 @@ app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
 // ✅ Root
 app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
 
+// Import the auth router
+const authRouter = require('./auth/linkedin');
+app.use('/', authRouter); 
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Skillarly backend running on http://localhost:${PORT}`);
