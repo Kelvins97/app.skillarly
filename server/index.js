@@ -28,6 +28,39 @@ const openai = new OpenAI({
 app.use(cors());
 app.use(express.json());
 
+
+// Allow requests from your frontend domain
+app.use(cors({
+  origin: 'https://skillarly.vercel.app', 
+  credentials: true // For cookies/session
+}));
+
+// Session setup (required for Passport)
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: true, // For HTTPS
+    sameSite: 'none' // Required for cross-origin cookies
+  }
+}));
+
+// Mount auth routes
+app.use('/auth', require('./auth/linkedin'));
+
+// In linkedin.js (backend callback route)
+app.get('/auth/linkedin/callback',
+  passport.authenticate('linkedin', { failureRedirect: '/login-failed' }),
+  (req, res) => {
+    // Generate a JWT token
+    const token = generateSecureToken(req.user);
+    
+    // Redirect to FRONTEND dashboard with token
+    res.redirect(`https://skillarly.vercel.app/dashboard?token=${token}`);
+  }
+);
+
 // Rate limiter setup
 const recommendationsLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -120,7 +153,7 @@ function verifyAuthToken(req, res, next) {
   }
 }
 
-// Redirect LinkedIn profile visits to mobile with profile param
+// Redirect LinkedIn profile visits to home with profile param
 app.get('/go', (req, res) => {
   const ref = req.get('Referrer') || '';
   if (ref.includes('linkedin.com/in/')) {
@@ -518,6 +551,7 @@ app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
     res.status(500).json({ error: 'jsearch_failed' });
   }
 });
+
 
 // ✅ Root
 app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
