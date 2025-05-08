@@ -1,5 +1,7 @@
+import express from 'express';
+const router = express.Router();
 import passport from 'passport';
-const LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
+//const LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
 import LinkedInStrategy from 'passport-linkedin-oauth2';
 import session from 'express-session';
 
@@ -34,6 +36,14 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+// LinkedIn OAuth routes
+router.get('/auth/linkedin', passport.authenticate('linkedin'));
+
+router.get('/auth/linkedin/callback',
+  passport.authenticate('linkedin', { failureRedirect: '/login-failed' }),
+  (req, res) => { /* ... */ }
+);
 
 // Authentication routes
 app.get('/auth/linkedin', passport.authenticate('linkedin'));
@@ -97,13 +107,7 @@ function generateSecureToken(user) {
   })).toString('base64');
 }
 
-// LinkedIn OAuth routes
-router.get('/auth/linkedin', passport.authenticate('linkedin'));
 
-router.get('/auth/linkedin/callback',
-  passport.authenticate('linkedin', { failureRedirect: '/login-failed' }),
-  (req, res) => { /* ... */ }
-);
 
 // Export the router
 module.exports = router; // 🟢 Critical!
