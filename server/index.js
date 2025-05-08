@@ -11,6 +11,7 @@ import pg from 'pg';
 import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
 import fetch from 'node-fetch';
+import session from 'express-session';
 
 // Initialize modules with config
 dotenv.config();
