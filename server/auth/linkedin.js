@@ -1,8 +1,8 @@
 import express from 'express';
 const router = express.Router();
 import passport from 'passport';
-//const LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
-import LinkedInStrategy from 'passport-linkedin-oauth2';
+const LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
+//import LinkedInStrategy from 'passport-linkedin-oauth2';
 import session from 'express-session';
 
 
@@ -11,7 +11,7 @@ passport.use(new LinkedInStrategy({
   clientID: process.env.LINKEDIN_CLIENT_ID,
   clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
   callbackURL: 'https://skillarly-backend.onrender.com/auth/linkedin/callback',
-  scope: ['r_liteprofile', 'r_emailaddress'],
+  scope: ['email', 'profile', 'openid'],
   state: true
 }, (accessToken, refreshToken, profile, done) => {
   // Store the LinkedIn profile data and tokens
