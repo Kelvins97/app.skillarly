@@ -1,8 +1,11 @@
 import express from 'express';
 const router = express.Router();
 import passport from 'passport';
-var LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
+//var LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
 import session from 'express-session';
+import LinkedInStrategy from '@sokratis/passport-linkedin-oauth2';
+
+
 
 
 // Configure LinkedIn strategy
@@ -36,12 +39,14 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+
 // LinkedIn OAuth routes
 router.get('/auth/linkedin', passport.authenticate('linkedin'));
-
 router.get('/auth/linkedin/callback',
-  passport.authenticate('linkedin', { failureRedirect: '/login-failed' }),
-  (req, res) => { /* ... */ }
+  passport.authenticate('linkedin', {
+    failureRedirect: '/login-failed',
+    successRedirect: process.env.FRONTEND_URL
+  })
 );
 
 // Authentication routes
