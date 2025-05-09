@@ -111,4 +111,4 @@ function generateSecureToken(user) {
 
 
 // Export the router
-module.exports = router; // 🟢 Critical!
+export const authRouter = router;
