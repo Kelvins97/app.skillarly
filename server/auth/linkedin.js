@@ -1,8 +1,7 @@
 import express from 'express';
 const router = express.Router();
 import passport from 'passport';
-const LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
-//import LinkedInStrategy from 'passport-linkedin-oauth2';
+var LinkedInStrategy = require('passport-linkedin-oauth2').Strategy;
 import session from 'express-session';
 
 
