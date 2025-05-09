@@ -12,7 +12,7 @@ import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
 import fetch from 'node-fetch';
 import session from 'express-session';
-import authRouter from './auth/linkedin.js'; 
+import { authRouter } from './auth/linkedin.js';
 
 // Initialize modules with config
 dotenv.config();
