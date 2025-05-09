@@ -13,6 +13,8 @@ import rateLimit from 'express-rate-limit';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import { authRouter } from './auth/linkedin.js';
+import RedisStore from 'connect-redis';
+import { createClient } from 'redis';
 
 // Initialize modules with config
 dotenv.config();
@@ -37,19 +39,28 @@ app.use(cors({
   credentials: true // For cookies/session
 }));
 
-// Session setup (required for Passport)
+
+// Configure Redis client
+const redisClient = createClient({
+  url: process.env.REDIS_URL
+});
+await redisClient.connect();
+
+// Update session config
 app.use(session({
   secret: process.env.SESSION_SECRET,
+  store: new RedisStore({ client: redisClient }),
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true, // For HTTPS
-    sameSite: 'none' // Required for cross-origin cookies
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
   }
 }));
 
 // Mount auth routes
 app.use('/auth', authRouter);
+
 
 // In linkedin.js (backend callback route)
 app.get('/auth/linkedin/callback',
