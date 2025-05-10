@@ -5,6 +5,15 @@ import { Strategy as LinkedInStrategy } from '@sokratis/passport-linkedin-oauth2
 import session from 'express-session';
 
 
+// Debug: Confirm env vars are loaded
+console.log('LinkedIn Client ID:', process.env.LINKEDIN_CLIENT_ID?.substring(0, 4) + '...'); // Shows first 4 chars
+console.log('LinkedIn Client Secret:', process.env.LINKEDIN_CLIENT_SECRET?.substring(0, 4) + '...');
+
+// Throw clear error if missing
+if (!process.env.LINKEDIN_CLIENT_ID || !process.env.LINKEDIN_CLIENT_SECRET) {
+  throw new Error('LinkedIn Client ID/Secret not configured!');
+}
+
 // Configure LinkedIn strategy
 passport.use(new LinkedInStrategy({
   clientID: process.env.LINKEDIN_CLIENT_ID,
