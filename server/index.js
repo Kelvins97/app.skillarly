@@ -82,7 +82,7 @@ app.use('/auth', authRouter);
 app.get('/login-failed', (req, res) => {
   res.status(401).send(`
     <h1>Login Failed</h1>
-    <p>Return to <a href="/">homepage</a></p>
+     res.redirect(`${process.env.FRONTEND_URL}/login-error`);
   `);
 });
 
