@@ -12,7 +12,6 @@ import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
 import fetch from 'node-fetch';
 import session from 'express-session';
-import passport from 'passport'; 
 import { authRouter } from './auth/linkedin.js';
 import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
@@ -47,15 +46,15 @@ const redisClient = createClient({
 });
 await redisClient.connect();
 
-// Handle Redis errors
-redisClient.on('error', (err) => {
-  console.error('Redis connection error:', err);
-});
-
-// Connect to Redis (for Redis v4+)
+// Handle Redis connections
 (async () => {
-  await redisClient.connect();
-  console.log('Connected to Redis successfully');
+  try {
+    if (!redisClient.isOpen) await redisClient.connect();
+    console.log("✅ Redis connected");
+  } catch (error) {
+    console.error("❌ Redis connection failed:", error);
+    process.exit(1);
+  }
 })();
 
 // Update session config
