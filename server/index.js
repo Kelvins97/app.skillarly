@@ -70,6 +70,11 @@ app.use(session({
   }
 }));
 
+// Passport initialization
+app.use(passport.initialize());
+app.use(passport.session());
+
+
 // Mount auth routes
 app.use('/auth', authRouter);
 
