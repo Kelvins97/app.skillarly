@@ -78,6 +78,13 @@ app.use(passport.session());
 // Mount auth routes
 app.use('/auth', authRouter);
 
+// Define the login-failed route
+app.get('/login-failed', (req, res) => {
+  res.status(401).send(`
+    <h1>Login Failed</h1>
+    <p>Return to <a href="/">homepage</a></p>
+  `);
+});
 
 // In linkedin.js (backend callback route)
 app.get('/auth/linkedin/callback',
