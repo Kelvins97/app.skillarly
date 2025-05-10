@@ -46,10 +46,11 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+const authRouter = express.Router();
 
 // LinkedIn OAuth routes
-router.get('/auth/linkedin', passport.authenticate('linkedin'));
-router.get('/auth/linkedin/callback',
+authRouter.get('/linkedin', passport.authenticate('linkedin'));
+authRouter.get('/linkedin/callback',
   passport.authenticate('linkedin', {
     failureRedirect: '/login-failed',
     successRedirect: process.env.FRONTEND_URL
@@ -121,4 +122,4 @@ function generateSecureToken(user) {
 
 
 // Export the router
-export const authRouter = router;
+export { authRouter };
