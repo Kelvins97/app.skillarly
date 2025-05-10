@@ -46,6 +46,17 @@ const redisClient = createClient({
 });
 await redisClient.connect();
 
+// Handle Redis errors
+redisClient.on('error', (err) => {
+  console.error('Redis connection error:', err);
+});
+
+// Connect to Redis (for Redis v4+)
+(async () => {
+  await redisClient.connect();
+  console.log('Connected to Redis successfully');
+})();
+
 // Update session config
 app.use(session({
   secret: process.env.SESSION_SECRET,
