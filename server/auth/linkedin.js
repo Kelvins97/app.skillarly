@@ -4,6 +4,7 @@ import passport from 'passport';
 import { Strategy as LinkedInStrategy } from '@sokratis/passport-linkedin-oauth2';
 import session from 'express-session';
 
+const app = express();
 
 // Debug: Confirm env vars are loaded
 console.log('LinkedIn Client ID:', process.env.LINKEDIN_CLIENT_ID?.substring(0, 4) + '...'); // Shows first 4 chars
