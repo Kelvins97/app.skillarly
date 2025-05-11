@@ -91,8 +91,8 @@ export const initializeAuth = () => {
     }));
 
     authRouter.get('/linkedin', passport.authenticate('linkedin'));
-    authRouter.get('/linkedin/callback', // ✅ Add /callback
-    passport.authenticate('linkedin', { 
+    authRouter.get('/linkedin/callback'); // ✅ Add /callback
+    passport.authenticate('linkedin'); { 
     failureRedirect: '/login-failed'
     })
     );
