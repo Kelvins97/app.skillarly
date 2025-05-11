@@ -64,9 +64,35 @@ const redisClient = createClient({
 app.use(passport.initialize());
 app.use(passport.session());
 
+//Callback handler
+app.get('/auth/linkedin/callback',
+  passport.authenticate('linkedin', {
+    failureRedirect: '/login-failed',
+    session: false
+  }),
+  (req, res) => {
+    try {
+      console.log('✅ Successful Authentication');
+      const token = jwt.sign(
+        {
+          sub: req.user.sub,
+          name: req.user.name,
+          exp: Math.floor(Date.now() / 1000) + 3600
+        },
+        process.env.JWT_SECRET
+      );
+      res.redirect(`${process.env.FRONTEND_URL}/dashboard?token=${token}`);
+    } catch (error) {
+      console.error('💥 Token Generation Error:', error);
+      res.redirect('/login-failed?error=token_error');
+    }
+  }
+);
+
 // Login failure handler
 app.get('/login-failed', (req, res) => {
-  console.error('Login failed:', req.query.error);
+  const error = req.query.error || 'unknown_error';
+  console.log(`❌ Login Failed: ${error}`);
   res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin`);
 });
 
