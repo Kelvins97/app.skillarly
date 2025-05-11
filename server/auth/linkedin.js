@@ -90,11 +90,12 @@ export const initializeAuth = () => {
       session: false // Disable session for JWT
     }));
 
-    router.get('/linkedin/callback', 
-      passport.authenticate('linkedin', {
-        session: false,
-        failureRedirect: '/login-failed'
-      }),
+    authRouter.get('/linkedin', passport.authenticate('linkedin'));
+    authRouter.get('/linkedin/callback', // ✅ Add /callback
+    passport.authenticate('linkedin', { 
+    failureRedirect: '/login-failed'
+    })
+    );
       (req, res) => {
         try {
           const token = generateSecureToken(req.user);
