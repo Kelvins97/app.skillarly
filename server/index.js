@@ -144,15 +144,6 @@ app.get('/go', (req, res) => {
 
 
 // Authentication Required Routes
-app.post('/scrape-profile', verifyAuthToken, handleScrapeProfile);
-app.get('/user-info', verifyAuthToken, handleUserInfo);
-app.post('/update-preferences', verifyAuthToken, handleUpdatePreferences);
-app.post('/subscribe', verifyAuthToken, handleSubscribe);
-app.post('/subscription', verifyAuthToken, handleSubscription);
-app.post('/scrape-log', verifyAuthToken, handleScrapeLog);
-app.post('/recommendations', recommendationsLimiter, verifyAuthToken, handleRecommendations);
-
-
 // Scrape LinkedIn profile and save data - protected with auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
