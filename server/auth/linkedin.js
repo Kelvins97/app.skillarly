@@ -26,44 +26,37 @@ const configureLinkedInStrategy = () => {
     passReqToCallback: true
   }, (req, accessToken, refreshToken, profile, done) => {
     try {
-      // Debug: Log raw profile data
-      console.log('Raw LinkedIn Profile:', JSON.stringify(profile, null, 2));
-      console.log('Access Token:', accessToken.substring(0, 6) + '...');
-      console.log('Refresh Token:', refreshToken?.substring(0, 6) + '...');
+      console.log('⏳ LinkedIn Auth Flow Started');
+      console.log('🔑 Access Token:', accessToken?.substring(0, 6) + '...');
+      console.log('🔄 Refresh Token:', refreshToken?.substring(0, 6) + '...');
+      console.log('📄 Raw Profile:', JSON.stringify(profile, null, 2));
 
       // Validate critical profile data
       if (!profile?.id) {
-        console.error('Invalid profile structure - missing ID');
-        return done(new Error('Invalid LinkedIn profile data received'));
+        console.error('❌ Missing Profile ID');
+        return done(new Error('invalid_profile'), null);
       }
 
-      // Construct user object with fallbacks
       const user = {
         id: profile.id,
-        sub: profile._json?.sub || profile.id,
-        name: profile.displayName || 'Unknown User',
+        sub: profile._json?.sub || 'missing_sub',
+        name: profile.displayName || 'Anonymous',
         email: profile.emails?.[0]?.value || null,
         profileUrl: profile._json?.vanityName 
           ? `https://linkedin.com/in/${profile._json.vanityName}`
-          : profile._json?.profileUrl || null,
+          : null,
         accessToken: accessToken
       };
 
-      // Debug: Verify email existence
-      if (!user.email) {
-        console.warn('No email found in profile. Scopes:', profile._json?.scope);
-      }
-
-      console.log('Processed User:', JSON.stringify(user, null, 2));
+      console.log('👤 Processed User:', JSON.stringify(user, null, 2));
       return done(null, user);
 
     } catch (error) {
-      console.error('LinkedIn Auth Error:', error);
-      return done(new Error(`Authentication failed: ${error.message}`));
+      console.error('🔥 Critical Error:', error.stack);
+      return done(new Error(`auth_failure: ${error.message}`));
     }
   }));
 };
-
 
 
 // Configure passport serialization
