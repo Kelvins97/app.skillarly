@@ -13,9 +13,10 @@ import rateLimit from 'express-rate-limit';
 import fetch from 'node-fetch';
 import session from 'express-session';
 import passport from 'passport'; 
-import { authRouter } from './auth/linkedin.js';
+import { initializeAuth } from './auth/linkedin.js'; // Updated auth initialization
 import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
+import jwt from 'jsonwebtoken';
 
 // Initialize modules with config
 dotenv.config();
@@ -29,25 +30,11 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-
-// Allow requests from your frontend domain
-app.use(cors({
-  origin: 'https://skillarly.vercel.app', 
-  credentials: true // For cookies/session
-}));
-
-
 // Configure Redis client
 const redisClient = createClient({
   url: process.env.REDIS_URL
 });
-await redisClient.connect();
 
-// Handle Redis connections
 (async () => {
   try {
     if (!redisClient.isOpen) await redisClient.connect();
@@ -58,7 +45,7 @@ await redisClient.connect();
   }
 })();
 
-// Update session config
+// Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET,
   store: new RedisStore({ client: redisClient }),
@@ -66,38 +53,45 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
-// Passport initialization
+// Initialize Passport and auth routes
 app.use(passport.initialize());
 app.use(passport.session());
+app.use('/auth', initializeAuth()); // Mount the auth router
 
+// Middleware
+app.use(cors({
+  origin: 'https://skillarly.vercel.app',
+  credentials: true
+}));
+app.use(express.json());
 
-// Mount auth routes
-app.use('/auth', authRouter);
-
-// Define the login-failed route
-// Define the login-failed route
-app.get('/login-failed', (req, res) => {
-  res.status(401).send(`
-    <h1>Login Failed</h1>
-    <p>Return to <a href="/">homepage</a></p>
-  `);
-});
-
-// In linkedin.js (backend callback route)
-app.get('/auth/linkedin/callback',
-  passport.authenticate('linkedin', { failureRedirect: '/login-failed' }),
-  (req, res) => {
-    // Generate a JWT token
-    const token = generateSecureToken(req.user);
-    
-    // Redirect to FRONTEND dashboard with token
-    res.redirect(`https://skillarly.vercel.app/dashboard?token=${token}`);
+// Updated authentication middleware using JWT
+function verifyAuthToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, message: 'Authentication required' });
   }
-);
+
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    console.error('JWT verification failed:', error);
+    const message = error.name === 'TokenExpiredError' 
+      ? 'Token expired' 
+      : 'Invalid authentication token';
+    res.status(401).json({ success: false, message });
+  }
+}
 
 // Rate limiter setup
 const recommendationsLimiter = rateLimit({
@@ -121,6 +115,7 @@ async function getMpesaToken() {
   const data = await res.json();
   return data.access_token;
 }
+
 
 // ✅ M-Pesa STK Push Helper
 async function sendMpesaPush({ amount, phone, email }) {
