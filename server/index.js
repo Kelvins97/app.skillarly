@@ -125,6 +125,15 @@ app.get('/auth/linkedin/callback',
   }
 );
 
+
+// Login Failure Handler
+app.get('/login-failed', (req, res) => {
+    const error = req.query.error || 'unknown_error';
+    console.log(`Login Failed: ${error}`);
+    res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin`);
+  });
+  
+
 // Public Routes
 app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
 
