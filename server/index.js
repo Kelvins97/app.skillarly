@@ -45,17 +45,18 @@ const redisClient = createClient({
   }
 })();
 
-// Session configuration
-app.use(session({
+
+ app.use(session({
   secret: process.env.SESSION_SECRET,
   store: new RedisStore({ client: redisClient }),
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'none',
-    domain: '.render.com', // Or your domain
-    maxAge: 24 * 60 * 60 * 1000
+    secure: true, // Must be true in production
+    sameSite: 'none', // Essential for cross-domain
+    maxAge: 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    domain: process.env.COOKIE_DOMAIN || '.render.com'
   }
 }));
 
