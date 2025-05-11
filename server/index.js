@@ -61,13 +61,24 @@ app.use(session({
 // Initialize Passport and auth routes
 app.use(passport.initialize());
 app.use(passport.session());
-app.use('/auth', initializeAuth()); // Mount the auth router
+
+// Login failure handler
+app.get('/login-failed', (req, res) => {
+  console.error('Login failed:', req.query.error);
+  res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin`);
+});
+
+//Mount the auth router
+app.use('/auth', initializeAuth()); 
+
+
 
 // Middleware
 app.use(cors({
   origin: 'https://skillarly.vercel.app',
   credentials: true
 }));
+
 app.use(express.json());
 
 // Updated authentication middleware using JWT
@@ -193,6 +204,7 @@ app.get('/go', (req, res) => {
     return res.redirect(`/index.html?profile=${encodeURIComponent(ref)}`);
   }
   return res.redirect('/index.html');
+  //return res.redirect(process.env.FRONTEND_URL);
 });
 
 // Scrape LinkedIn profile and save data - protected with auth
