@@ -12,111 +12,72 @@ import Stripe from 'stripe';
 import rateLimit from 'express-rate-limit';
 import fetch from 'node-fetch';
 import session from 'express-session';
-import passport from 'passport'; 
-import { initializeAuth } from './auth/linkedin.js'; // Updated auth initialization
+import passport from 'passport';
+import { initializeAuth } from './auth/linkedin.js';
 import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
 import jwt from 'jsonwebtoken';
 
-// Initialize modules with config
+// 1. Environment Configuration ================================================
 dotenv.config();
+
+// 2. Initialize Core Services =================================================
 const app = express();
 const stripe = stripePackage(process.env.STRIPE_SECRET_KEY);
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const redisClient = createClient({ url: process.env.REDIS_URL });
 
-// OpenAI configuration
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+// 3. Middleware Setup =========================================================
+app.use(express.json());
+app.use(cors({
+  origin: 'https://skillarly.vercel.app',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-// Configure Redis client
-const redisClient = createClient({
-  url: process.env.REDIS_URL
-});
+// 4. Session Configuration ====================================================
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  store: new RedisStore({ client: redisClient }),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    domain: process.env.COOKIE_DOMAIN || 'skillarly-backend.onrender.com'
+  }
+}));
 
+// 5. Authentication Setup =====================================================
+app.use(passport.initialize());
+app.use(passport.session());
+
+// 6. Redis Connection =========================================================
 (async () => {
   try {
-    if (!redisClient.isOpen) await redisClient.connect();
+    await redisClient.connect();
     console.log("✅ Redis connected");
+    app.emit('redis-connected');
   } catch (error) {
     console.error("❌ Redis connection failed:", error);
     process.exit(1);
   }
 })();
 
-
- app.use(session({
-  secret: process.env.SESSION_SECRET,
-  store: new RedisStore({ client: redisClient }),
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: true, // Must be true in production
-    sameSite: 'none', // Essential for cross-domain
-    maxAge: 24 * 60 * 60 * 1000,
-    httpOnly: true,
-    domain: process.env.COOKIE_DOMAIN || '.render.com'
-  }
-}));
-
-// Initialize Passport and auth routes
-app.use(passport.initialize());
-app.use(passport.session());
-
-//Callback handler
-app.get('/auth/linkedin/callback',
-  passport.authenticate('linkedin', {
-    failureRedirect: '/login-failed',
-    session: false
-  }),
-  (req, res) => {
-    try {
-      console.log('✅ Successful Authentication');
-      const token = jwt.sign(
-        {
-          sub: req.user.sub,
-          name: req.user.name,
-          exp: Math.floor(Date.now() / 1000) + 3600
-        },
-        process.env.JWT_SECRET
-      );
-      res.redirect(`${process.env.FRONTEND_URL}/dashboard?token=${token}`);
-    } catch (error) {
-      console.error('💥 Token Generation Error:', error);
-      res.redirect('/login-failed?error=token_error');
-    }
-  }
-);
-
-// Login failure handler
-app.get('/login-failed', (req, res) => {
-  const error = req.query.error || 'unknown_error';
-  const description = req.query.error_description || '';
-  console.log(`❌ Login Failed: ${error}`);
-  console.log(`LinkedIn Error: ${error} - ${description}`);
-  res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin`);
-});
-
-//Mount the auth router
-app.use('/auth', initializeAuth()); 
-
-
-
-// Middleware
-app.use(cors({
-  origin: 'https://skillarly.vercel.app',
-  credentials: true
-}));
-
-app.use(express.json());
-
-// Updated authentication middleware using JWT
-function verifyAuthToken(req, res, next) {
+// 7. JWT Authentication Middleware ============================================
+const verifyAuthToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   
   if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'Authentication required' });
+    return res.status(401).json({ 
+      success: false, 
+      message: 'Authorization header with Bearer token required' 
+    });
   }
 
   const token = authHeader.split(' ')[1];
@@ -126,69 +87,46 @@ function verifyAuthToken(req, res, next) {
     req.user = decoded;
     next();
   } catch (error) {
-    console.error('JWT verification failed:', error);
+    console.error('JWT verification failed:', error.message);
     const message = error.name === 'TokenExpiredError' 
-      ? 'Token expired' 
+      ? 'Token expired - please reauthenticate' 
       : 'Invalid authentication token';
     res.status(401).json({ success: false, message });
   }
-}
+};
 
-// Rate limiter setup
-const recommendationsLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  message: 'Too many requests. Please try again later.'
-});
+// 8. Routes Configuration =====================================================
 
-// 🧠 Helper: get user ID by email
-async function getUserId(email) {
-  const res = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-  return res.rows[0]?.id || null;
-}
+// Auth Routes
+app.use('/auth', initializeAuth());
 
-// ✅ M-Pesa Token Helper
-async function getMpesaToken() {
-  const auth = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
-  const res = await fetch("https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials", {
-    headers: { Authorization: `Basic ${auth}` }
-  });
-  const data = await res.json();
-  return data.access_token;
-}
+// LinkedIn OAuth Callback
+app.get('/auth/linkedin/callback',
+  passport.authenticate('linkedin', {
+    failureRedirect: '/login-failed',
+    session: false
+  }),
+  (req, res) => {
+    try {
+      const token = jwt.sign(
+        {
+          sub: req.user.sub,
+          name: req.user.name,
+          email: req.user.email,
+          exp: Math.floor(Date.now() / 1000) + 3600 // 1 hour
+        },
+        process.env.JWT_SECRET
+      );
+      res.redirect(`${process.env.FRONTEND_URL}/dashboard?token=${token}`);
+    } catch (error) {
+      console.error('Token Generation Error:', error);
+      res.redirect('/login-failed?error=token_error');
+    }
+  }
+);
 
-
-// ✅ M-Pesa STK Push Helper
-async function sendMpesaPush({ amount, phone, email }) {
-  const token = await getMpesaToken();
-  const timestamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
-  const password = Buffer.from(`${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
-
-  const res = await fetch("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      BusinessShortCode: process.env.MPESA_SHORTCODE,
-      Password: password,
-      Timestamp: timestamp,
-      TransactionType: "CustomerPayBillOnline",
-      Amount: amount,
-      PartyA: phone,
-      PartyB: process.env.MPESA_SHORTCODE,
-      PhoneNumber: phone,
-      CallBackURL: process.env.MPESA_CALLBACK_URL,
-      AccountReference: email,
-      TransactionDesc: "Skillarly Subscription"
-    })
-  });
-
-  return await res.json();
-}
-
-
+// Public Routes
+app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
 
 // Redirect LinkedIn profile visits to home with profile param
 app.get('/go', (req, res) => {
@@ -204,6 +142,15 @@ app.get('/go', (req, res) => {
   return res.redirect(baseUrl);
 });
 
+
+// Authentication Required Routes
+app.post('/scrape-profile', verifyAuthToken, handleScrapeProfile);
+app.get('/user-info', verifyAuthToken, handleUserInfo);
+app.post('/update-preferences', verifyAuthToken, handleUpdatePreferences);
+app.post('/subscribe', verifyAuthToken, handleSubscribe);
+app.post('/subscription', verifyAuthToken, handleSubscription);
+app.post('/scrape-log', verifyAuthToken, handleScrapeLog);
+app.post('/recommendations', recommendationsLimiter, verifyAuthToken, handleRecommendations);
 
 
 // Scrape LinkedIn profile and save data - protected with auth
@@ -398,6 +345,13 @@ app.post('/scrape-log', verifyAuthToken, async (req, res) => {
   const userId = req.user.id;
   await pool.query(`INSERT INTO scrape_logs (user_id) VALUES ($1)`, [userId]);
   res.json({ success: true });
+});
+
+// Rate limiter setup
+const recommendationsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: 'Too many requests. Please try again later.'
 });
 
 // ✅ Recommendations (Rate-limited, plan-checked) - protected with auth
@@ -597,10 +551,121 @@ app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
 });
 
 
-// ✅ Root
-app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
 
+
+// Error Handling Routes
+app.get('/login-failed', handleLoginFailure);
+app.post('/mpesa/callback', handleMpesaCallback);
+app.post('/reset-scrapes', handleResetScrapes);
+
+// 9. Route Handlers ===========================================================
+
+// LinkedIn Referral Handler
+function handleLinkedInReferral(req, res) {
+  const ref = req.get('Referrer') || '';
+  const baseUrl = process.env.FRONTEND_URL;
+  
+  if (ref.includes('linkedin.com/in/')) {
+    return res.redirect(`${baseUrl}/?profile=${encodeURIComponent(ref)}`);
+  }
+  return res.redirect(baseUrl);
+}
+
+// Scrape Profile Handler
+async function handleScrapeProfile(req, res) {
+  try {
+    const { profileUrl } = req.body;
+    const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
+
+    if (!profileUrl.includes(req.user.sub)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only analyze your own LinkedIn profile'
+      });
+    }
+
+    const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
+    const limits = { basic: 2, pro: 10, premium: 100 };
+    const allowed = limits[user?.plan || 'basic'];
+
+    if (user?.monthly_scrapes >= allowed) {
+      return res.status(403).json({ error: 'limit_reached' });
+    }
+
+    const parsed = await scraper(profileUrl);
+    await supabase.from('users').upsert([{
+      email,
+      name: parsed.name,
+      skills: parsed.skills,
+      certifications: parsed.certifications,
+      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
+      last_scrape: new Date().toISOString(),
+      plan: user?.plan || 'basic',
+      subscribed: true
+    }], { onConflict: 'email' });
+
+    await sendEmail(email, parsed.name, parsed.skills);
+    res.json({ success: true, email });
+  } catch (err) {
+    console.error('Scrape error:', err);
+    res.status(500).json({ error: 'scrape_failed' });
+  }
+}
+
+// ... (Other handler functions - keep your existing implementations) ...
+// 🧠 Helper: get user ID by email
+async function getUserId(email) {
+  const res = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+  return res.rows[0]?.id || null;
+}
+
+// ✅ M-Pesa Token Helper
+async function getMpesaToken() {
+  const auth = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
+  const res = await fetch("https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials", {
+    headers: { Authorization: `Basic ${auth}` }
+  });
+  const data = await res.json();
+  return data.access_token;
+}
+
+
+// ✅ M-Pesa STK Push Helper
+async function sendMpesaPush({ amount, phone, email }) {
+  const token = await getMpesaToken();
+  const timestamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+  const password = Buffer.from(`${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
+
+  const res = await fetch("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      BusinessShortCode: process.env.MPESA_SHORTCODE,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: "CustomerPayBillOnline",
+      Amount: amount,
+      PartyA: phone,
+      PartyB: process.env.MPESA_SHORTCODE,
+      PhoneNumber: phone,
+      CallBackURL: process.env.MPESA_CALLBACK_URL,
+      AccountReference: email,
+      TransactionDesc: "Skillarly Subscription"
+    })
+  });
+
+  return await res.json();
+}
+
+
+// 10. Server Startup ==========================================================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Skillarly backend running on http://localhost:${PORT}`);
+
+app.on('redis-connected', () => {
+  app.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
+  });
 });
