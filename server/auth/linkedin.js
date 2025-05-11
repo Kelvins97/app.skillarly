@@ -78,37 +78,21 @@ const generateSecureToken = (user) => {
   );
 };
 
-// Initialize authentication module
+  // Initialize auth routes
 export const initializeAuth = () => {
-  try {
-    validateEnv();
-    configureLinkedInStrategy();
-    configurePassport();
-    
-    // LinkedIn OAuth routes
-    router.get('/linkedin', passport.authenticate('linkedin', {
-      session: false // Disable session for JWT
-    }));
-
-    authRouter.get('/linkedin', passport.authenticate('linkedin'));
-    authRouter.get('/linkedin/callback'); // ✅ Add /callback
-    passport.authenticate('linkedin'); { 
-    failureRedirect: '/login-failed'
+  configureLinkedInStrategy();
+  
+  // Define routes
+  router.get('/linkedin', passport.authenticate('linkedin'));
+  router.get('/linkedin/callback',
+    passport.authenticate('linkedin', { 
+      failureRedirect: '/login-failed',
+      successRedirect: process.env.FRONTEND_URL
     })
-    );
-      (req, res) => {
-        try {
-          const token = generateSecureToken(req.user);
-          res.redirect(
-            `${process.env.FRONTEND_URL}/dashboard?` +
-            `token=${encodeURIComponent(token)}` +
-            `&profile=${encodeURIComponent(req.user.profileUrl)}`
-          );
-        } catch (error) {
-          res.redirect('/login-failed?error=token_generation_failed');
-        }
-      }
-    );
+  ); // ✅ Properly closed
+
+  return router;
+};
 
     return router;
   } catch (error) {
