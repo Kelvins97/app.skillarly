@@ -89,12 +89,12 @@ export const initializeAuth = () => {
       failureRedirect: '/login-failed',
       successRedirect: process.env.FRONTEND_URL
     })
-  ); // ✅ Properly closed
+  ); 
 
   return router;
 };
 
-    return router;
+
   } catch (error) {
     console.error('Authentication initialization failed:', error);
     process.exit(1);
