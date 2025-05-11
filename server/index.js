@@ -148,7 +148,7 @@ async function sendMpesaPush({ amount, phone, email }) {
 }
 
 // Authentication middleware
-function verifyAuthToken(req, res, next) {
+function verifyAdminToken(req, res, next) {
   // Get token from Authorization header
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
