@@ -92,7 +92,9 @@ app.get('/auth/linkedin/callback',
 // Login failure handler
 app.get('/login-failed', (req, res) => {
   const error = req.query.error || 'unknown_error';
+  const description = req.query.error_description || '';
   console.log(`❌ Login Failed: ${error}`);
+  console.log(`LinkedIn Error: ${error} - ${description}`);
   res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin`);
 });
 
