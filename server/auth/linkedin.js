@@ -15,7 +15,7 @@ const validateEnv = () => {
   }
 };
 
-// Configure LinkedIn OpenID Connect strategy
+// auth/linkedin.js
 const configureLinkedInStrategy = () => {
   passport.use(new LinkedInStrategy({
     clientID: process.env.LINKEDIN_CLIENT_ID,
@@ -26,23 +26,42 @@ const configureLinkedInStrategy = () => {
     passReqToCallback: true
   }, (req, accessToken, refreshToken, profile, done) => {
     try {
+      // Debug: Log raw profile data
+      console.log('Raw LinkedIn Profile:', JSON.stringify(profile, null, 2));
+      console.log('Access Token:', accessToken.substring(0, 6) + '...');
+      console.log('Refresh Token:', refreshToken?.substring(0, 6) + '...');
+
+      // Validate critical profile data
+      if (!profile?.id) {
+        console.error('Invalid profile structure - missing ID');
+        return done(new Error('Invalid LinkedIn profile data received'));
+      }
+
+      // Construct user object with fallbacks
       const user = {
         id: profile.id,
-        sub: profile._json.sub,
-        name: profile.displayName,
-        email: profile.emails?.[0]?.value,
+        sub: profile._json?.sub || profile.id,
+        name: profile.displayName || 'Unknown User',
+        email: profile.emails?.[0]?.value || null,
         profileUrl: profile._json?.vanityName 
           ? `https://linkedin.com/in/${profile._json.vanityName}`
-          : null,
+          : profile._json?.profileUrl || null,
         accessToken: accessToken
       };
+
+      // Debug: Verify email existence
+      if (!user.email) {
+        console.warn('No email found in profile. Scopes:', profile._json?.scope);
+      }
+
+      console.log('Processed User:', JSON.stringify(user, null, 2));
       return done(null, user);
+
     } catch (error) {
-      return done(error);
+      console.error('LinkedIn Auth Error:', error);
+      return done(new Error(`Authentication failed: ${error.message}`));
     }
   }));
-   //console.log('LinkedIn Profile:', JSON.stringify(profile, null, 2));
-   //console.log('Access Token:', accessToken);
 };
 
 
