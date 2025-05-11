@@ -541,14 +541,6 @@ app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
   }
 });
 
-
-
-
-// Error Handling Routes
-app.get('/login-failed', handleLoginFailure);
-app.post('/mpesa/callback', handleMpesaCallback);
-app.post('/reset-scrapes', handleResetScrapes);
-
 // 9. Route Handlers ===========================================================
 
 // LinkedIn Referral Handler
