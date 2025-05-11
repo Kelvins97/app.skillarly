@@ -15,7 +15,7 @@ const validateEnv = () => {
   }
 };
 
-// auth/linkedin.js
+// Configure LinkedIn strategy
 const configureLinkedInStrategy = () => {
   passport.use(new LinkedInStrategy({
     clientID: process.env.LINKEDIN_CLIENT_ID,
@@ -31,7 +31,6 @@ const configureLinkedInStrategy = () => {
       console.log('🔄 Refresh Token:', refreshToken?.substring(0, 6) + '...');
       console.log('📄 Raw Profile:', JSON.stringify(profile, null, 2));
 
-      // Validate critical profile data
       if (!profile?.id) {
         console.error('❌ Missing Profile ID');
         return done(new Error('invalid_profile'), null);
@@ -58,7 +57,6 @@ const configureLinkedInStrategy = () => {
   }));
 };
 
-
 // Configure passport serialization
 const configurePassport = () => {
   passport.serializeUser((user, done) => done(null, user));
@@ -71,29 +69,30 @@ const generateSecureToken = (user) => {
     {
       sub: user.sub,
       name: user.name,
-      exp: Math.floor(Date.now() / 1000) + (60 * 60) // 1 hour expiration
+      exp: Math.floor(Date.now() / 1000) + (60 * 60)
     },
     process.env.JWT_SECRET,
     { algorithm: 'HS256' }
   );
 };
 
-  // Initialize auth routes
+// Initialize auth routes
 export const initializeAuth = () => {
-  configureLinkedInStrategy();
-  
-  // Define routes
-  router.get('/linkedin', passport.authenticate('linkedin'));
-  router.get('/linkedin/callback',
-    passport.authenticate('linkedin', { 
-      failureRedirect: '/login-failed',
-      successRedirect: process.env.FRONTEND_URL
-    })
-  ); 
+  try {
+    validateEnv();
+    configureLinkedInStrategy();
+    configurePassport();
+    
+    // Define routes
+    router.get('/linkedin', passport.authenticate('linkedin'));
+    router.get('/linkedin/callback',
+      passport.authenticate('linkedin', { 
+        failureRedirect: '/login-failed',
+        successRedirect: process.env.FRONTEND_URL
+      })
+    );
 
-  return router;
-};
-
+    return router;
 
   } catch (error) {
     console.error('Authentication initialization failed:', error);
