@@ -41,8 +41,8 @@ const configureLinkedInStrategy = () => {
       return done(error);
     }
   }));
-   console.log('LinkedIn Profile:', JSON.stringify(profile, null, 2));
-   console.log('Access Token:', accessToken);
+   //console.log('LinkedIn Profile:', JSON.stringify(profile, null, 2));
+   //console.log('Access Token:', accessToken);
 };
 
 
