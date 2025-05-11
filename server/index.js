@@ -158,54 +158,23 @@ async function sendMpesaPush({ amount, phone, email }) {
   return await res.json();
 }
 
-// Authentication middleware
-function verifyAdminToken(req, res, next) {
-  // Get token from Authorization header
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Authentication required' 
-    });
-  }
-  
-  const token = authHeader.split(' ')[1];
-  
-  try {
-    // Decode and verify the token
-    const decoded = Buffer.from(token, 'base64').toString();
-    const userData = JSON.parse(decoded);
-    
-    // Check if token is expired (e.g., 24 hour validity)
-    const now = Date.now();
-    if (now - userData.timestamp > 24 * 60 * 60 * 1000) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Token expired' 
-      });
-    }
-    
-    // Add user data to request for use in route handlers
-    req.user = userData;
-    next();
-  } catch (error) {
-    console.error('Token verification failed:', error);
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Invalid authentication token' 
-    });
-  }
-}
+
 
 // Redirect LinkedIn profile visits to home with profile param
 app.get('/go', (req, res) => {
   const ref = req.get('Referrer') || '';
+  const baseUrl = process.env.FRONTEND_URL;
+  
   if (ref.includes('linkedin.com/in/')) {
-    return res.redirect(`/index.html?profile=${encodeURIComponent(ref)}`);
+    return res.redirect(
+      `${baseUrl}/?profile=${encodeURIComponent(ref)}`
+    );
   }
-  return res.redirect('/index.html');
-  //return res.redirect(process.env.FRONTEND_URL);
+  
+  return res.redirect(baseUrl);
 });
+
+
 
 // Scrape LinkedIn profile and save data - protected with auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
