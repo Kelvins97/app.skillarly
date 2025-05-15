@@ -60,14 +60,27 @@ app.use(passport.session());
 // 6. Redis Connection =========================================================
 (async () => {
   try {
+    // Add event listeners for better Redis diagnostics
+    redisClient.on('error', (err) => {
+      console.error('❌ Redis Error:', err);
+    });
+    
+    redisClient.on('reconnecting', () => {
+      console.log('🔄 Redis reconnecting...');
+    });
+    
     await redisClient.connect();
     console.log("✅ Redis connected");
     app.emit('redis-connected');
   } catch (error) {
     console.error("❌ Redis connection failed:", error);
-    process.exit(1);
+    // Don't exit immediately, try to run without Redis
+    console.log("⚠️ Continuing without Redis - sessions will not persist");
+    // Still emit event so server can start
+    app.emit('redis-connected');
   }
 })();
+
 
 // 7. JWT Authentication Middleware ============================================
 const verifyAuthToken = (req, res, next) => {
@@ -100,38 +113,37 @@ const verifyAuthToken = (req, res, next) => {
 // Auth Routes
 app.use('/auth', initializeAuth());
 
-// LinkedIn OAuth Callback
-app.get('/auth/linkedin/callback',
-  passport.authenticate('linkedin', {
-    failureRedirect: '/login-failed',
-    session: false
-  }),
-  (req, res) => {
-    try {
-      const token = jwt.sign(
-        {
-          sub: req.user.sub,
-          name: req.user.name,
-          email: req.user.email,
-          exp: Math.floor(Date.now() / 1000) + 3600 // 1 hour
-        },
-        process.env.JWT_SECRET
-      );
-      res.redirect(`${process.env.FRONTEND_URL}/dashboard?token=${token}`);
-    } catch (error) {
-      console.error('Token Generation Error:', error);
-      res.redirect('/login-failed?error=token_error');
-    }
-  }
-);
 
 
 // Login Failure Handler
 app.get('/login-failed', (req, res) => {
-    const error = req.query.error || 'unknown_error';
-    console.log(`Login Failed: ${error}`);
-    res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin`);
+  const error = req.query.error || 'unknown_error';
+  console.log(`Login Failed: ${error}`);
+  
+  // Add detailed logging
+  if (req.query.details) {
+    console.error('Auth failure details:', req.query.details);
+  }
+  
+  // Redirect to frontend with error information
+  res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin&error=${encodeURIComponent(error)}`);
+});
+
+
+
+// ADD this debug endpoint to check authentication status
+app.get('/auth-status', (req, res) => {
+  res.json({
+    authenticated: req.isAuthenticated(),
+    user: req.user ? {
+      id: req.user.id,
+      name: req.user.name,
+      // Don't include email in response for privacy
+    } : null,
+    sessionActive: !!req.session,
+    passport: !!req.session?.passport
   });
+});  
   
 
 // Public Routes
@@ -153,19 +165,19 @@ app.get('/go', (req, res) => {
 
 
 // Authentication Required Routes
-// Scrape LinkedIn profile and save data - protected with auth
+/* Scrape LinkedIn profile and save data - protected with auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
 
   // Additional verification: ensure user is scraping their own profile
-  if (!profileUrl.includes(req.user.id)) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only analyze your own LinkedIn profile'
-    });
-  }
-
+    if (!profileUrl.includes('linkedin.com/in/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid LinkedIn profile URL'
+      });
+    }
+    
   try {
     const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
     const limits = { basic: 2, pro: 10, premium: 100 };
@@ -192,6 +204,80 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   } catch (err) {
     console.error('Scrape error:', err);
     res.status(500).json({ error: 'scrape_failed' });
+  }
+});*/
+
+// UPDATE the handleScrapeProfile function to properly use the LinkedIn profile ID
+async function handleScrapeProfile(req, res) {
+  try {
+    const { profileUrl } = req.body;
+    const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
+    
+    // Remove this overly restrictive validation or improve it
+    // The current check might be too strict as LinkedIn IDs may not match the sub claim
+    /*
+    if (!profileUrl.includes(req.user.sub)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only analyze your own LinkedIn profile'
+      });
+    }
+    */
+    
+    // Instead, validate the profile URL format
+    if (!profileUrl.includes('linkedin.com/in/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid LinkedIn profile URL'
+      });
+    }
+
+    const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
+    const limits = { basic: 2, pro: 10, premium: 100 };
+    const allowed = limits[user?.plan || 'basic'];
+
+    if (user?.monthly_scrapes >= allowed) {
+      return res.status(403).json({ error: 'limit_reached' });
+    }
+
+    const parsed = await scraper(profileUrl);
+    await supabase.from('users').upsert([{
+      email,
+      name: parsed.name,
+      skills: parsed.skills,
+      certifications: parsed.certifications,
+      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
+      last_scrape: new Date().toISOString(),
+      plan: user?.plan || 'basic',
+      subscribed: true
+    }], { onConflict: 'email' });
+
+    await sendEmail(email, parsed.name, parsed.skills);
+    res.json({ success: true, email });
+  } catch (err) {
+    console.error('Scrape error:', err);
+    res.status(500).json({ error: 'scrape_failed' });
+  }
+}
+
+//App Health
+app.get('/auth/health', (req, res) => {
+  const sessionActive = !!req.session;
+  const redisConnected = redisClient.isReady;
+  
+  if (sessionActive && redisConnected) {
+    res.status(200).json({ 
+      status: 'ok', 
+      message: 'Auth service is healthy',
+      redis: 'connected',
+      session: 'active'
+    });
+  } else {
+    res.status(503).json({
+      status: 'unhealthy',
+      redis: redisConnected ? 'connected' : 'disconnected',
+      session: sessionActive ? 'active' : 'inactive'
+    });
   }
 });
 
