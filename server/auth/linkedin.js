@@ -34,7 +34,7 @@ const configureLinkedInStrategy = () => {
     clientID: process.env.LINKEDIN_CLIENT_ID,
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
     callbackURL: process.env.LINKEDIN_CALLBACK_URL,
-    scope: ['r_emailaddress', 'r_liteprofile'], // Using minimal scopes to reduce issues
+    scope: ['openid', 'profile', 'email'], // Using minimal scopes to reduce issues
     state: true,
     passReqToCallback: true,
     // Explicitly set session to true to ensure state is stored
