@@ -2,6 +2,7 @@ import express from 'express';
 import passport from 'passport';
 import { Strategy as LinkedInStrategy } from '@sokratis/passport-linkedin-oauth2';
 import jwt from 'jsonwebtoken';
+import fetch from 'node-fetch'; // Make sure this is imported
 
 const router = express.Router();
 
@@ -37,7 +38,6 @@ const configureLinkedInStrategy = () => {
     scope: ['openid', 'profile', 'email'], // Using minimal scopes to reduce issues
     state: true,
     passReqToCallback: true,
-    // Explicitly set session to true to ensure state is stored
     session: true
   }, (req, accessToken, refreshToken, profile, done) => {
     try {
@@ -123,7 +123,7 @@ const generateSecureToken = (user) => {
   console.log('Generating JWT token for user:', user.id);
   return jwt.sign(
     {
-      sub: user.sub,
+      sub: user.sub || user.id,
       id: user.id,
       name: user.name,
       email: user.email,
@@ -178,6 +178,7 @@ export const initializeAuth = () => {
     router.get('/linkedin/callback', (req, res, next) => {
       console.log('LinkedIn callback received');
       console.log('Session ID at callback:', req.sessionID);
+      console.log('Authorization code:', req.query.code?.substring(0, 10) + '...');
       
       // Check if session persisted
       if (req.session) {
@@ -209,9 +210,8 @@ export const initializeAuth = () => {
             // Code exists, but state verification failed
             console.log('Attempting alternative authentication with code:', req.query.code);
             
-            // We'll use this approach to bypass state verification
-            // A more secure implementation would involve saving state in DB/Redis
-            return res.redirect(`${process.env.FRONTEND_URL}/auth/manual-verify?code=${req.query.code}`);
+            // Immediately handle manual verification instead of redirecting
+            return handleManualVerification(req, res);
           }
           
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=session_state_verification_failed`);
@@ -241,15 +241,17 @@ export const initializeAuth = () => {
       })(req, res, next);
     });
     
-    // Manual verification endpoint (for handling state verification failures)
-    router.get('/manual-verify', async (req, res) => {
+    // Helper function to handle manual verification
+    const handleManualVerification = async (req, res) => {
       const { code } = req.query;
       
       if (!code) {
-        return res.status(400).json({ error: 'Missing code parameter' });
+        console.error('Missing code parameter');
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=missing_code`);
       }
       
       try {
+        console.log('Manually exchanging code for token...');
         // Exchange code for token manually
         const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
           method: 'POST',
@@ -265,30 +267,58 @@ export const initializeAuth = () => {
           })
         });
         
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          console.error('Token exchange failed:', tokenResponse.status, errorText);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=token_exchange_failed`);
+        }
+        
         const tokenData = await tokenResponse.json();
+        console.log('Token exchange successful:', tokenData.access_token?.substring(0, 10) + '...');
         
         if (!tokenData.access_token) {
-          return res.status(400).json({ error: 'Failed to exchange code for token' });
+          console.error('No access token in response');
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_access_token`);
         }
         
         // Fetch user profile
+        console.log('Fetching LinkedIn profile...');
         const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
           headers: {
             Authorization: `Bearer ${tokenData.access_token}`
           }
         });
         
+        if (!profileResponse.ok) {
+          const errorText = await profileResponse.text();
+          console.error('Profile fetch failed:', profileResponse.status, errorText);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=profile_fetch_failed`);
+        }
+        
         const profileData = await profileResponse.json();
+        console.log('Profile fetched:', JSON.stringify({
+          id: profileData.id,
+          firstName: profileData.localizedFirstName,
+          lastName: profileData.localizedLastName
+        }));
         
         // Fetch email address 
+        console.log('Fetching email address...');
         const emailResponse = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
           headers: {
             Authorization: `Bearer ${tokenData.access_token}`
           }
         });
         
-        const emailData = await emailResponse.json();
-        const email = emailData.elements?.[0]?.['handle~']?.emailAddress;
+        let email = null;
+        
+        if (emailResponse.ok) {
+          const emailData = await emailResponse.json();
+          email = emailData.elements?.[0]?.['handle~']?.emailAddress;
+          console.log('Email fetched:', email || 'Not available');
+        } else {
+          console.warn('Could not fetch email:', await emailResponse.text());
+        }
         
         // Create user object
         const user = {
@@ -298,16 +328,23 @@ export const initializeAuth = () => {
           accessToken: tokenData.access_token
         };
         
+        console.log('Created user object:', JSON.stringify(user, null, 2));
+        
         // Generate JWT token
         const token = generateSecureToken(user);
+        console.log('Generated JWT token');
         
         // Redirect to frontend with token
+        console.log('Redirecting to frontend with token');
         return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
       } catch (error) {
         console.error('Manual verification error:', error);
-        return res.status(500).json({ error: 'Failed to verify code' });
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Manual verification failed')}`);
       }
-    });
+    };
+    
+    // Manual verification endpoint 
+    router.get('/manual-verify', handleManualVerification);
     
     // Testing routes
     router.get('/health', (req, res) => {
