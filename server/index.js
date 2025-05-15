@@ -165,7 +165,7 @@ app.get('/go', (req, res) => {
 
 
 // Authentication Required Routes
-/* Scrape LinkedIn profile and save data - protected with auth
+// Scrape LinkedIn profile and save data - protected with auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
@@ -205,60 +205,8 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     console.error('Scrape error:', err);
     res.status(500).json({ error: 'scrape_failed' });
   }
-});*/
+});
 
-// UPDATE the handleScrapeProfile function to properly use the LinkedIn profile ID
-async function handleScrapeProfile(req, res) {
-  try {
-    const { profileUrl } = req.body;
-    const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
-    
-    // Remove this overly restrictive validation or improve it
-    // The current check might be too strict as LinkedIn IDs may not match the sub claim
-    /*
-    if (!profileUrl.includes(req.user.sub)) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only analyze your own LinkedIn profile'
-      });
-    }
-    */
-    
-    // Instead, validate the profile URL format
-    if (!profileUrl.includes('linkedin.com/in/')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid LinkedIn profile URL'
-      });
-    }
-
-    const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
-    const limits = { basic: 2, pro: 10, premium: 100 };
-    const allowed = limits[user?.plan || 'basic'];
-
-    if (user?.monthly_scrapes >= allowed) {
-      return res.status(403).json({ error: 'limit_reached' });
-    }
-
-    const parsed = await scraper(profileUrl);
-    await supabase.from('users').upsert([{
-      email,
-      name: parsed.name,
-      skills: parsed.skills,
-      certifications: parsed.certifications,
-      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
-      last_scrape: new Date().toISOString(),
-      plan: user?.plan || 'basic',
-      subscribed: true
-    }], { onConflict: 'email' });
-
-    await sendEmail(email, parsed.name, parsed.skills);
-    res.json({ success: true, email });
-  } catch (err) {
-    console.error('Scrape error:', err);
-    res.status(500).json({ error: 'scrape_failed' });
-  }
-}
 
 //App Health
 app.get('/auth/health', (req, res) => {
@@ -654,11 +602,13 @@ async function handleScrapeProfile(req, res) {
   try {
     const { profileUrl } = req.body;
     const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
-
-    if (!profileUrl.includes(req.user.sub)) {
-      return res.status(403).json({
+  
+    
+    // Instead, validate the profile URL format
+    if (!profileUrl.includes('linkedin.com/in/')) {
+      return res.status(400).json({
         success: false,
-        message: 'You can only analyze your own LinkedIn profile'
+        message: 'Invalid LinkedIn profile URL'
       });
     }
 
