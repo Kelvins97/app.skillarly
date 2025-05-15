@@ -41,17 +41,26 @@ const configureLinkedInStrategy = () => {
     try {
       console.log('⏳ LinkedIn Auth Flow Started');
       console.log('🔑 Access Token:', accessToken?.substring(0, 6) + '...');
-      console.log('📄 Profile ID:', profile?.id || 'missing');
       
-      if (!profile?.id) {
-        console.error('❌ Missing Profile ID');
-        return done(new Error('invalid_profile'), null);
+      // Enhanced profile debugging
+      console.log('📄 Raw Profile:', JSON.stringify(profile, null, 2));
+      
+      // More detailed validation
+      if (!profile) {
+        console.error('❌ Profile object is missing entirely');
+        return done(new Error('missing_profile'), null);
       }
       
+      if (!profile.id) {
+        console.error('❌ Missing Profile ID');
+        return done(new Error('missing_profile_id'), null);
+      }
+      
+      // Extract user data with fallbacks and enhanced logging
       const user = {
         id: profile.id,
         sub: profile._json?.sub || profile.id,
-        name: profile.displayName || 'Anonymous',
+        name: profile.displayName || profile.name?.givenName || 'Anonymous',
         email: profile.emails?.[0]?.value || null,
         profileUrl: profile._json?.vanityName 
           ? `https://linkedin.com/in/${profile._json.vanityName}`
@@ -65,6 +74,15 @@ const configureLinkedInStrategy = () => {
         email: user.email,
         profileUrl: user.profileUrl
       }, null, 2));
+      
+      // Verify we have minimum required data
+      if (!user.name || user.name === 'Anonymous') {
+        console.warn('⚠️ User name missing or default');
+      }
+      
+      if (!user.email) {
+        console.warn('⚠️ User email missing - this might cause issues downstream');
+      }
       
       return done(null, user);
     } catch (error) {
@@ -126,11 +144,27 @@ export const initializeAuth = () => {
       console.log('LinkedIn callback received');
       
       passport.authenticate('linkedin', { session: false }, (err, user, info) => {
-        console.log('Auth result:', { error: err?.message, hasUser: !!user });
+        // Enhanced error logging
+        console.log('Auth result:', { 
+          error: err?.message, 
+          hasUser: !!user,
+          info: info || 'No info provided'
+        });
         
-        if (err || !user) {
+        if (err) {
           console.error('Authentication error:', err);
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(err?.message || 'Authentication failed')}`);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(err.message || 'Authentication failed')}`);
+        }
+        
+        if (!user) {
+          console.error('No user returned from authentication');
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('No user data received')}`);
+        }
+        
+        // Validate user object has minimum required fields
+        if (!user.id || !user.name) {
+          console.error('User object missing required fields:', JSON.stringify(user));
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Incomplete user data')}`);
         }
         
         try {
