@@ -135,8 +135,9 @@ export const initializeAuth = () => {
         console.log('- Code:', code ? '[PRESENT]' : '[MISSING]');
         
         // Make request to LinkedIn token endpoint
+        let tokenResponse;
         try {
-          const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+          tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/x-www-form-urlencoded',
@@ -170,18 +171,24 @@ export const initializeAuth = () => {
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=network_error`);
         }
         
-        const tokenData = await tokenResponse.json();
-        
-        // Debug token response
-        console.log('Token response received:');
-        console.log('- Access token present:', !!tokenData.access_token);
-        console.log('- ID token present:', !!tokenData.id_token);
-        console.log('- Token type:', tokenData.token_type);
-        console.log('- Expires in:', tokenData.expires_in);
-        
-        if (!tokenData.access_token) {
-          console.error('No access token in response');
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_access_token`);
+        let tokenData;
+        try {
+          tokenData = await tokenResponse.json();
+          
+          // Debug token response
+          console.log('Token response received:');
+          console.log('- Access token present:', !!tokenData.access_token);
+          console.log('- ID token present:', !!tokenData.id_token);
+          console.log('- Token type:', tokenData.token_type);
+          console.log('- Expires in:', tokenData.expires_in);
+          
+          if (!tokenData.access_token) {
+            console.error('No access token in response');
+            return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_access_token`);
+          }
+        } catch (error) {
+          console.error('Error parsing token response:', error);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_token_response`);
         }
         
         // Using OpenID Connect instead of LinkedIn's v2 API
