@@ -1,6 +1,3 @@
-// Updated LinkedIn OAuth implementation with fixed client authentication
-// Replace your current linkedin.js with this file
-
 import express from 'express';
 import passport from 'passport';
 import { Strategy as LinkedInStrategy } from '@sokratis/passport-linkedin-oauth2';
@@ -77,6 +74,7 @@ export const initializeAuth = () => {
       // Redirect to LinkedIn
       res.redirect(authUrl.toString());
     });
+
     
     // LinkedIn callback handler
     router.get('/linkedin/callback', async (req, res) => {
@@ -202,3 +200,14 @@ export const initializeAuth = () => {
     return errorRouter;
   }
 };
+
+router.get('/debug/env', (req, res) => {
+  res.json({
+    LINKEDIN_CLIENT_ID: process.env.LINKEDIN_CLIENT_ID || 'MISSING',
+    LINKEDIN_CLIENT_SECRET: process.env.LINKEDIN_CLIENT_SECRET ? 'SET' : 'MISSING',
+    LINKEDIN_CALLBACK_URL: process.env.LINKEDIN_CALLBACK_URL || 'MISSING',
+    FRONTEND_URL: process.env.FRONTEND_URL || 'MISSING',
+    JWT_SECRET: process.env.JWT_SECRET ? 'SET' : 'MISSING',
+  });
+});
+
