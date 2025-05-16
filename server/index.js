@@ -17,11 +17,13 @@ import { initializeAuth } from './auth/linkedin.js';
 import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
 import jwt from 'jsonwebtoken';
+import { verifyAuthToken } from './authMiddleware.js';
+import authRoutes from './authRoutes.js';
 
-// 1. Environment Configuration ================================================
+// 1. Environment Configuration
 dotenv.config();
 
-// 2. Initialize Core Services =================================================
+// 2. Initialize Core Services
 const app = express();
 const stripe = stripePackage(process.env.STRIPE_SECRET_KEY);
 const { Pool } = pg;
@@ -29,16 +31,16 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
-// 3. Middleware Setup =========================================================
+// 3. Middleware Setup
 app.use(express.json());
 app.use(cors({
-  origin: 'https://skillarly.vercel.app',
+  origin: process.env.CORS_ORIGIN || 'https://skillarly.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// 4. Session Configuration ====================================================
+// 4. Session Configuration
 app.use(session({
   secret: process.env.SESSION_SECRET,
   store: new RedisStore({ client: redisClient }),
@@ -53,14 +55,13 @@ app.use(session({
   }
 }));
 
-// 5. Authentication Setup =====================================================
+// 5. Authentication Setup
 app.use(passport.initialize());
 app.use(passport.session());
 
-// 6. Redis Connection =========================================================
+// 6. Redis Connection
 (async () => {
   try {
-    // Add event listeners for better Redis diagnostics
     redisClient.on('error', (err) => {
       console.error('❌ Redis Error:', err);
     });
@@ -74,82 +75,46 @@ app.use(passport.session());
     app.emit('redis-connected');
   } catch (error) {
     console.error("❌ Redis connection failed:", error);
-    // Don't exit immediately, try to run without Redis
     console.log("⚠️ Continuing without Redis - sessions will not persist");
-    // Still emit event so server can start
     app.emit('redis-connected');
   }
 })();
 
+// 7. Routes Configuration
 
-// 7. JWT Authentication Middleware ============================================
-const verifyAuthToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Authorization header with Bearer token required' 
-    });
-  }
+// Public Routes
+app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
 
-  const token = authHeader.split(' ')[1];
-  
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    console.error('JWT verification failed:', error.message);
-    const message = error.name === 'TokenExpiredError' 
-      ? 'Token expired - please reauthenticate' 
-      : 'Invalid authentication token';
-    res.status(401).json({ success: false, message });
-  }
-};
-
-// 8. Routes Configuration =====================================================
-
-// Auth Routes
+// Auth Routes - Use LinkedIn OAuth and custom auth routes
 app.use('/auth', initializeAuth());
+app.use('/auth', authRoutes);
 
-
-
-// Login Failure Handler
+// This route is already defined in the LinkedIn auth module
 app.get('/login-failed', (req, res) => {
   const error = req.query.error || 'unknown_error';
   console.log(`Login Failed: ${error}`);
   
-  // Add detailed logging
   if (req.query.details) {
     console.error('Auth failure details:', req.query.details);
   }
   
-  // Redirect to frontend with error information
   res.redirect(`${process.env.FRONTEND_URL}/login-error?from=linkedin&error=${encodeURIComponent(error)}`);
 });
 
-
-
-// ADD this debug endpoint to check authentication status
+// Debugging endpoint for auth status
 app.get('/auth-status', (req, res) => {
   res.json({
     authenticated: req.isAuthenticated(),
     user: req.user ? {
       id: req.user.id,
       name: req.user.name,
-      // Don't include email in response for privacy
     } : null,
     sessionActive: !!req.session,
     passport: !!req.session?.passport
   });
-});  
-  
+});
 
-// Public Routes
-app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
-
-// Redirect LinkedIn profile visits to home with profile param
+// Redirect LinkedIn profile visits
 app.get('/go', (req, res) => {
   const ref = req.get('Referrer') || '';
   const baseUrl = process.env.FRONTEND_URL;
@@ -163,20 +128,17 @@ app.get('/go', (req, res) => {
   return res.redirect(baseUrl);
 });
 
-
-// Authentication Required Routes
-// Scrape LinkedIn profile and save data - protected with auth
+// Protected Routes (using JWT token)
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
 
-  // Additional verification: ensure user is scraping their own profile
-    if (!profileUrl.includes('linkedin.com/in/')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid LinkedIn profile URL'
-      });
-    }
+  if (!profileUrl.includes('linkedin.com/in/')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid LinkedIn profile URL'
+    });
+  }
     
   try {
     const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
@@ -207,56 +169,28 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   }
 });
 
-
-//App Health
-app.get('/auth/health', (req, res) => {
+// Health Check Endpoint
+app.get('/health', (req, res) => {
   const sessionActive = !!req.session;
   const redisConnected = redisClient.isReady;
   
   if (sessionActive && redisConnected) {
     res.status(200).json({ 
       status: 'ok', 
-      message: 'Auth service is healthy',
+      message: 'Service is healthy',
       redis: 'connected',
       session: 'active'
     });
   } else {
     res.status(503).json({
-      status: 'unhealthy',
+      status: 'degraded',
       redis: redisConnected ? 'connected' : 'disconnected',
       session: sessionActive ? 'active' : 'inactive'
     });
   }
 });
 
-// ✅ Auth/Login
-app.post('/auth/login', async (req, res) => {
-  const { email, name, photo_url } = req.body;
-  const result = await pool.query(`
-    INSERT INTO users (email, name, photo_url)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
-    RETURNING id
-  `, [email, name, photo_url]);
-  
-  // Generate authentication token
-  const userData = {
-    id: result.rows[0].id,
-    email,
-    name,
-    timestamp: Date.now()
-  };
-  
-  const token = Buffer.from(JSON.stringify(userData)).toString('base64');
-  
-  res.json({ 
-    success: true, 
-    userId: result.rows[0].id,
-    token
-  });
-});
-
-// ✅ User Info - protected with auth
+// User Info - protected with JWT auth
 app.get('/user-info', verifyAuthToken, async (req, res) => {
   const email = req.user.email;
   
@@ -280,7 +214,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
   res.json(result.rows[0] || {});
 });
 
-// ✅ Update Preferences - protected with auth
+// Update Preferences - protected with JWT auth
 app.post('/update-preferences', verifyAuthToken, async (req, res) => {
   const { email_notifications, frequency = 'weekly' } = req.body;
   const userId = req.user.id;
@@ -295,7 +229,7 @@ app.post('/update-preferences', verifyAuthToken, async (req, res) => {
   res.json({ success: true });
 });
 
-// ✅ Subscribe or re-subscribe user - protected with auth
+// Subscribe or re-subscribe user - protected with JWT auth
 app.post('/subscribe', verifyAuthToken, async (req, res) => {
   const { name, headline, skills, certifications } = req.body;
   const email = req.user.email;
@@ -322,7 +256,6 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
 // Subscription Endpoint - protected with auth
 app.post('/subscription', verifyAuthToken, async (req, res) => {
   const { plan, paymentMethod } = req.body;
