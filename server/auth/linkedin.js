@@ -35,7 +35,7 @@ const configureLinkedInStrategy = () => {
     clientID: process.env.LINKEDIN_CLIENT_ID,
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
     callbackURL: process.env.LINKEDIN_CALLBACK_URL,
-    scope: ['r_emailaddress', 'r_liteprofile'], // Using standard LinkedIn scopes instead of OpenID scopes
+    scope: ['openid', 'profile', 'email'], // Using standard LinkedIn scopes instead of OpenID scopes
     state: true,
     passReqToCallback: true,
     session: true
