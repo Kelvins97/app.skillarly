@@ -1,6 +1,4 @@
 import express from 'express';
-import passport from 'passport';
-import { Strategy as LinkedInStrategy } from '@sokratis/passport-linkedin-oauth2';
 import jwt from 'jsonwebtoken';
 import fetch from 'node-fetch';
 
@@ -21,7 +19,6 @@ const generateSecureToken = (user) => {
   );
 };
 
-// Initialize auth routes
 export const initializeAuth = () => {
   try {
     // Validate required environment variables
@@ -38,12 +35,6 @@ export const initializeAuth = () => {
       throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
     }
     
-    // Basic passport configuration
-    passport.serializeUser((user, done) => done(null, user));
-    passport.deserializeUser((user, done) => done(null, user));
-    
-    // Skip the problematic passport strategy and use direct API calls instead
-    
     // Health check route
     router.get('/health', (req, res) => {
       res.status(200).json({ 
@@ -58,7 +49,7 @@ export const initializeAuth = () => {
       // Generate random state for CSRF protection
       const state = Math.random().toString(36).substring(2, 15);
       
-      // Store state in session if available (fallback to stateless if needed)
+      // Store state in session if available
       if (req.session) {
         req.session.linkedInState = state;
       }
@@ -69,14 +60,13 @@ export const initializeAuth = () => {
       authUrl.searchParams.append('client_id', process.env.LINKEDIN_CLIENT_ID);
       authUrl.searchParams.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
       authUrl.searchParams.append('state', state);
-      authUrl.searchParams.append('scope', 'openid profile email');
+      authUrl.searchParams.append('scope', 'openid profile email');  // Updated scopes
       
       // Redirect to LinkedIn
       res.redirect(authUrl.toString());
     });
-
     
-    // LinkedIn callback handler
+    // LinkedIn callback handler with OpenID Connect flow
     router.get('/linkedin/callback', async (req, res) => {
       try {
         const { code, state } = req.query;
@@ -94,7 +84,7 @@ export const initializeAuth = () => {
         
         console.log('Exchanging authorization code for access token');
         
-        // Manually exchange code for token - FIXED CLIENT AUTHENTICATION
+        // Exchange authorization code for access token
         const tokenRequestBody = new URLSearchParams();
         tokenRequestBody.append('grant_type', 'authorization_code');
         tokenRequestBody.append('code', code);
@@ -102,7 +92,6 @@ export const initializeAuth = () => {
         tokenRequestBody.append('client_id', process.env.LINKEDIN_CLIENT_ID);
         tokenRequestBody.append('client_secret', process.env.LINKEDIN_CLIENT_SECRET);
         
-        // Make request to LinkedIn token endpoint
         const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
           method: 'POST',
           headers: {
@@ -112,19 +101,9 @@ export const initializeAuth = () => {
           body: tokenRequestBody.toString()
         });
         
-        // Handle token exchange errors
         if (!tokenResponse.ok) {
           const errorData = await tokenResponse.text();
           console.error(`Token exchange failed: ${tokenResponse.status} ${errorData}`);
-          
-          // Additional logging to help diagnose issues
-          if (tokenResponse.status === 401) {
-            console.error('Client authentication failed - please verify:');
-            console.error('1. LinkedIn Client ID is correct');
-            console.error('2. LinkedIn Client Secret is correct (no extra spaces, encoding issues)');
-            console.error('3. Redirect URI exactly matches what is configured in LinkedIn');
-          }
-          
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=token_exchange_failed`);
         }
         
@@ -135,8 +114,8 @@ export const initializeAuth = () => {
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_access_token`);
         }
         
-        // Get basic profile data
-        const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
+        // Fetch user info from OpenID Connect userinfo endpoint
+        const profileResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
           headers: {
             'Authorization': `Bearer ${tokenData.access_token}`,
             'Accept': 'application/json'
@@ -144,34 +123,18 @@ export const initializeAuth = () => {
         });
         
         if (!profileResponse.ok) {
-          console.error('Profile fetch failed:', await profileResponse.text());
+          const errorText = await profileResponse.text();
+          console.error('Profile fetch failed:', errorText);
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=profile_fetch_failed`);
         }
         
         const profileData = await profileResponse.json();
         
-        // Get email address
-        const emailResponse = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
-          headers: {
-            'Authorization': `Bearer ${tokenData.access_token}`,
-            'Accept': 'application/json'
-          }
-        });
-        
-        let email = null;
-        
-        if (emailResponse.ok) {
-          const emailData = await emailResponse.json();
-          email = emailData.elements?.[0]?.['handle~']?.emailAddress;
-        } else {
-          console.warn('Could not fetch email:', await emailResponse.text());
-        }
-        
-        // Create user object
+        // Construct user object from OpenID userinfo response
         const user = {
-          id: profileData.id,
-          name: `${profileData.localizedFirstName || ''} ${profileData.localizedLastName || ''}`.trim() || 'LinkedIn User',
-          email: email,
+          id: profileData.sub,
+          name: profileData.name || `${profileData.given_name} ${profileData.family_name}`,
+          email: profileData.email,
           accessToken: tokenData.access_token
         };
         
@@ -200,14 +163,3 @@ export const initializeAuth = () => {
     return errorRouter;
   }
 };
-
-router.get('/debug/env', (req, res) => {
-  res.json({
-    LINKEDIN_CLIENT_ID: process.env.LINKEDIN_CLIENT_ID || 'MISSING',
-    LINKEDIN_CLIENT_SECRET: process.env.LINKEDIN_CLIENT_SECRET ? 'SET' : 'MISSING',
-    LINKEDIN_CALLBACK_URL: process.env.LINKEDIN_CALLBACK_URL || 'MISSING',
-    FRONTEND_URL: process.env.FRONTEND_URL || 'MISSING',
-    JWT_SECRET: process.env.JWT_SECRET ? 'SET' : 'MISSING',
-  });
-});
-
