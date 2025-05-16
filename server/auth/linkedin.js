@@ -285,6 +285,7 @@ export const initializeAuth = () => {
           decodedToken = JSON.parse(decodedString);
           
           console.log('Decoded token:', JSON.stringify(decodedToken).substring(0, 100) + '...');
+          console.log('Token fields:', Object.keys(decodedToken).join(', '));
         } catch (error) {
           console.error('Failed to decode ID token:', error);
           console.error('Token parts structure:', {
@@ -295,22 +296,59 @@ export const initializeAuth = () => {
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_id_token`);
         }
         
+        // Log complete token contents for debugging
+        console.log('Full decoded token contents:');
+        for (const [key, value] of Object.entries(decodedToken)) {
+          console.log(`- ${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
+        }
+        
         // Create user object from OpenID claims
+        // LinkedIn ID token structure may vary - we need to be flexible
         const user = {
-          id: decodedToken.sub,
+          id: decodedToken.sub || decodedToken.iss_id || '',
           name: decodedToken.name || 'LinkedIn User',
-          email: decodedToken.email,
-          // Store additional fields if needed
-          givenName: decodedToken.given_name,
-          familyName: decodedToken.family_name,
+          email: decodedToken.email || '',
+          // Store additional fields if available
+          givenName: decodedToken.given_name || decodedToken.firstName || '',
+          familyName: decodedToken.family_name || decodedToken.lastName || '',
           accessToken: tokenData.access_token
         };
         
-        // Generate JWT token
-        const token = generateSecureToken(user);
+        // If user ID is missing or empty, try to get it from alternative sources
+        if (!user.id) {
+          // If we couldn't get a user ID from the token, try to extract from other fields
+          console.log('User ID missing from token claims, checking alternative sources');
+          
+          // Check for email-based identity
+          if (decodedToken.email) {
+            user.id = `email:${decodedToken.email}`;
+            console.log('Using email as user ID fallback');
+          } 
+          // Last resort - generate a pseudo-unique ID
+          else {
+            user.id = `linkedin:${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+            console.log('Generated fallback ID');
+          }
+        }
         
-        // Redirect to frontend with token
-        return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
+        console.log('Final user object:', JSON.stringify({
+          ...user,
+          accessToken: user.accessToken ? '[PRESENT]' : '[MISSING]'
+        }));
+        
+        // Generate JWT token
+        try {
+          const token = generateSecureToken(user);
+          console.log('JWT token generated successfully');
+          
+          // Redirect to frontend with token
+          const redirectUrl = `${process.env.FRONTEND_URL}/auth/success?token=${token}`;
+          console.log('Redirecting to:', redirectUrl);
+          return res.redirect(redirectUrl);
+        } catch (jwtError) {
+          console.error('Error generating JWT:', jwtError);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=jwt_generation_failed`);
+        }
       } catch (error) {
         console.error('LinkedIn callback error:', error);
         return res.redirect(`${process.env.FRONTEND_URL}/login?error=server_error`);
