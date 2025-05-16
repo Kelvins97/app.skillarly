@@ -1,3 +1,6 @@
+// Updated LinkedIn OAuth implementation with fixed client authentication
+// Replace your current linkedin.js with this file
+
 import express from 'express';
 import passport from 'passport';
 import { Strategy as LinkedInStrategy } from '@sokratis/passport-linkedin-oauth2';
@@ -5,77 +8,6 @@ import jwt from 'jsonwebtoken';
 import fetch from 'node-fetch';
 
 const router = express.Router();
-
-// Validate environment variables
-const validateEnv = () => {
-  const requiredVars = [
-    'LINKEDIN_CLIENT_ID',
-    'LINKEDIN_CLIENT_SECRET',
-    'LINKEDIN_CALLBACK_URL',
-    'JWT_SECRET',
-    'FRONTEND_URL'
-  ];
-  
-  const missingVars = requiredVars.filter(varName => !process.env[varName]);
-  
-  if (missingVars.length > 0) {
-    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
-  }
-  
-  console.log('LinkedIn Client ID:', process.env.LINKEDIN_CLIENT_ID?.substring(0, 4) + '****');
-  console.log('LinkedIn Callback URL:', process.env.LINKEDIN_CALLBACK_URL);
-  // Never log even partial secrets in production
-};
-
-// Configure LinkedIn strategy
-const configureLinkedInStrategy = () => {
-  passport.use(new LinkedInStrategy({
-    clientID: process.env.LINKEDIN_CLIENT_ID,
-    clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
-    callbackURL: process.env.LINKEDIN_CALLBACK_URL,
-    scope: ['openid', 'profile', 'email'], // Current LinkedIn scopes
-    state: true,
-    passReqToCallback: true,
-    session: false // Using stateless authentication approach to avoid session issues
-  }, async (req, accessToken, refreshToken, profile, done) => {
-    try {
-      console.log('LinkedIn Auth Flow Started');
-      
-      // Enhanced profile debugging
-      console.log('Profile Details:', {
-        id: profile?.id || 'missing',
-        displayName: profile?.displayName || 'missing',
-        hasEmail: !!profile?.emails?.length,
-        emailValue: profile?.emails?.[0]?.value || 'missing'
-      });
-      
-      if (!profile || !profile.id) {
-        console.error('Missing profile or profile ID');
-        return done(new Error('invalid_profile'), null);
-      }
-      
-      // Build user object from profile
-      const user = {
-        id: profile.id,
-        sub: profile._json?.sub || profile.id,
-        name: profile.displayName || `${profile.name?.givenName || ''} ${profile.name?.familyName || ''}`.trim() || 'Anonymous',
-        email: profile.emails?.[0]?.value || null,
-        accessToken: accessToken
-      };
-      
-      return done(null, user);
-    } catch (error) {
-      console.error('Error in LinkedIn Strategy:', error);
-      return done(error);
-    }
-  }));
-};
-
-// Passport serialization (needed even for stateless approach)
-const configurePassport = () => {
-  passport.serializeUser((user, done) => done(null, user));
-  passport.deserializeUser((user, done) => done(null, user));
-};
 
 // JWT token generation
 const generateSecureToken = (user) => {
@@ -95,107 +27,104 @@ const generateSecureToken = (user) => {
 // Initialize auth routes
 export const initializeAuth = () => {
   try {
-    validateEnv();
-    configureLinkedInStrategy();
-    configurePassport();
+    // Validate required environment variables
+    const requiredVars = [
+      'LINKEDIN_CLIENT_ID',
+      'LINKEDIN_CLIENT_SECRET',
+      'LINKEDIN_CALLBACK_URL',
+      'JWT_SECRET',
+      'FRONTEND_URL'
+    ];
+    
+    const missingVars = requiredVars.filter(varName => !process.env[varName]);
+    if (missingVars.length > 0) {
+      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+    }
+    
+    // Basic passport configuration
+    passport.serializeUser((user, done) => done(null, user));
+    passport.deserializeUser((user, done) => done(null, user));
+    
+    // Skip the problematic passport strategy and use direct API calls instead
     
     // Health check route
     router.get('/health', (req, res) => {
-      res.status(200).json({ status: 'ok', message: 'Auth service is healthy' });
+      res.status(200).json({ 
+        status: 'ok', 
+        message: 'Auth service is healthy',
+        linkedinConfigured: !!process.env.LINKEDIN_CLIENT_ID
+      });
     });
     
-    // LinkedIn authentication initiation - STATELESS APPROACH
-    router.get('/linkedin', (req, res, next) => {
-      console.log('Starting LinkedIn authentication flow');
+    // LinkedIn auth initiation
+    router.get('/linkedin', (req, res) => {
+      // Generate random state for CSRF protection
+      const state = Math.random().toString(36).substring(2, 15);
       
-      passport.authenticate('linkedin', { 
-        session: false,
-        // Custom state parameter can be added here if needed
-        state: Buffer.from(Date.now().toString()).toString('hex')
-      })(req, res, next);
-    });
-    
-    // LinkedIn callback handler with FALLBACK MECHANISM
-    router.get('/linkedin/callback', (req, res, next) => {
-      console.log('LinkedIn callback received');
-      console.log('Authorization code present:', !!req.query.code);
-      
-      passport.authenticate('linkedin', { 
-        session: false,
-        failureRedirect: null // Prevent automatic redirect on failure
-      }, async (err, user, info) => {
-        console.log('Auth result:', { 
-          error: err?.message, 
-          hasUser: !!user,
-          info: info || 'No info provided'
-        });
-        
-        // Handle passport authentication errors
-        if (err || !user) {
-          console.log('Standard authentication failed, attempting manual verification');
-          
-          // Try manual verification if we have a code
-          if (req.query.code) {
-            return handleManualVerification(req, res);
-          }
-          
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(err?.message || 'Authentication failed')}`);
-        }
-        
-        try {
-          // Generate JWT token
-          const token = generateSecureToken(user);
-          
-          // Redirect to frontend with token
-          console.log('Authentication successful, redirecting to frontend');
-          return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
-        } catch (tokenError) {
-          console.error('Token generation error:', tokenError);
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Server error')}`);
-        }
-      })(req, res, next);
-    });
-    
-    // Helper function to handle manual verification with FIXED CLIENT AUTHENTICATION
-    const handleManualVerification = async (req, res) => {
-      const { code } = req.query;
-      
-      if (!code) {
-        console.error('Missing code parameter');
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=missing_code`);
+      // Store state in session if available (fallback to stateless if needed)
+      if (req.session) {
+        req.session.linkedInState = state;
       }
       
+      // Build LinkedIn authorization URL manually
+      const authUrl = new URL('https://www.linkedin.com/oauth/v2/authorization');
+      authUrl.searchParams.append('response_type', 'code');
+      authUrl.searchParams.append('client_id', process.env.LINKEDIN_CLIENT_ID);
+      authUrl.searchParams.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
+      authUrl.searchParams.append('state', state);
+      authUrl.searchParams.append('scope', 'openid profile email');
+      
+      // Redirect to LinkedIn
+      res.redirect(authUrl.toString());
+    });
+    
+    // LinkedIn callback handler
+    router.get('/linkedin/callback', async (req, res) => {
       try {
-        console.log('Manually exchanging code for token...');
+        const { code, state } = req.query;
         
-        // NEW: Create a proper application/x-www-form-urlencoded body
-        const tokenRequestBody = new URLSearchParams({
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: process.env.LINKEDIN_CALLBACK_URL,
-          client_id: process.env.LINKEDIN_CLIENT_ID,
-          client_secret: process.env.LINKEDIN_CLIENT_SECRET
-        });
+        if (!code) {
+          console.error('Missing authorization code');
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=missing_code`);
+        }
         
-        // Get access token using authorization code
+        // State validation (if session is available)
+        if (req.session?.linkedInState && req.session.linkedInState !== state) {
+          console.error('State mismatch - possible CSRF attack');
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_state`);
+        }
+        
+        console.log('Exchanging authorization code for access token');
+        
+        // Manually exchange code for token - FIXED CLIENT AUTHENTICATION
+        const tokenRequestBody = new URLSearchParams();
+        tokenRequestBody.append('grant_type', 'authorization_code');
+        tokenRequestBody.append('code', code);
+        tokenRequestBody.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
+        tokenRequestBody.append('client_id', process.env.LINKEDIN_CLIENT_ID);
+        tokenRequestBody.append('client_secret', process.env.LINKEDIN_CLIENT_SECRET);
+        
+        // Make request to LinkedIn token endpoint
         const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json'
           },
-          body: tokenRequestBody
+          body: tokenRequestBody.toString()
         });
         
         // Handle token exchange errors
         if (!tokenResponse.ok) {
-          const responseText = await tokenResponse.text();
-          console.error(`Token exchange failed: ${tokenResponse.status} ${responseText}`);
+          const errorData = await tokenResponse.text();
+          console.error(`Token exchange failed: ${tokenResponse.status} ${errorData}`);
           
-          // Add more detailed debugging for client authentication errors
+          // Additional logging to help diagnose issues
           if (tokenResponse.status === 401) {
-            console.error('CLIENT AUTHENTICATION ERROR: Please verify your LinkedIn client ID and secret are correct');
-            console.error('Also verify that the redirect URI exactly matches what is registered in LinkedIn');
+            console.error('Client authentication failed - please verify:');
+            console.error('1. LinkedIn Client ID is correct');
+            console.error('2. LinkedIn Client Secret is correct (no extra spaces, encoding issues)');
+            console.error('3. Redirect URI exactly matches what is configured in LinkedIn');
           }
           
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=token_exchange_failed`);
@@ -209,24 +138,24 @@ export const initializeAuth = () => {
         }
         
         // Get basic profile data
-        const profileResponse = await fetch('https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName)', {
+        const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
           headers: {
-            Authorization: `Bearer ${tokenData.access_token}`,
+            'Authorization': `Bearer ${tokenData.access_token}`,
             'Accept': 'application/json'
           }
         });
         
         if (!profileResponse.ok) {
-          console.error('Profile fetch failed:', profileResponse.status);
+          console.error('Profile fetch failed:', await profileResponse.text());
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=profile_fetch_failed`);
         }
         
         const profileData = await profileResponse.json();
         
-        // Get email address using the correct v2 API endpoint
+        // Get email address
         const emailResponse = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
           headers: {
-            Authorization: `Bearer ${tokenData.access_token}`,
+            'Authorization': `Bearer ${tokenData.access_token}`,
             'Accept': 'application/json'
           }
         });
@@ -237,13 +166,13 @@ export const initializeAuth = () => {
           const emailData = await emailResponse.json();
           email = emailData.elements?.[0]?.['handle~']?.emailAddress;
         } else {
-          console.warn('Could not fetch email');
+          console.warn('Could not fetch email:', await emailResponse.text());
         }
         
         // Create user object
         const user = {
           id: profileData.id,
-          name: `${profileData.localizedFirstName} ${profileData.localizedLastName}`,
+          name: `${profileData.localizedFirstName || ''} ${profileData.localizedLastName || ''}`.trim() || 'LinkedIn User',
           email: email,
           accessToken: tokenData.access_token
         };
@@ -254,13 +183,10 @@ export const initializeAuth = () => {
         // Redirect to frontend with token
         return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
       } catch (error) {
-        console.error('Manual verification error:', error);
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Manual verification failed')}`);
+        console.error('LinkedIn callback error:', error);
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=server_error`);
       }
-    };
-    
-    // Direct manual verification endpoint for debugging
-    router.get('/manual-verify', handleManualVerification);
+    });
     
     return router;
   } catch (error) {
