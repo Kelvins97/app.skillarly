@@ -163,11 +163,3 @@ export const initializeAuth = () => {
     return errorRouter;
   }
 };
-
-console.log('Token request body:', tokenRequestBody.toString());
-console.log('Client ID:', process.env.LINKEDIN_CLIENT_ID);
-console.log('Redirect URI:', process.env.LINKEDIN_CALLBACK_URL);
-
-const errorData = await tokenResponse.text();
-console.error('Token exchange failed:', errorData);
-
