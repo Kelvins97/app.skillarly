@@ -35,7 +35,7 @@ const configureLinkedInStrategy = () => {
     clientID: process.env.LINKEDIN_CLIENT_ID,
     clientSecret: process.env.LINKEDIN_CLIENT_SECRET,
     callbackURL: process.env.LINKEDIN_CALLBACK_URL,
-    scope: ['openid', 'profile', 'email'], // Using minimal scopes to reduce issues
+    scope: ['r_emailaddress', 'r_liteprofile'], // Using standard LinkedIn scopes instead of OpenID scopes
     state: true,
     passReqToCallback: true,
     session: true
@@ -140,6 +140,20 @@ export const initializeAuth = () => {
     validateEnv();
     configureLinkedInStrategy();
     configurePassport();
+    
+    // Debug route to check credentials
+    router.get('/check-credentials', (req, res) => {
+      const clientId = process.env.LINKEDIN_CLIENT_ID;
+      const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+      
+      res.json({
+        clientIdLength: clientId ? clientId.length : 0,
+        clientIdFirstChars: clientId ? clientId.substring(0, 4) + '***' : 'missing',
+        clientSecretLength: clientSecret ? clientSecret.length : 0,
+        clientSecretFirstChars: clientSecret ? clientSecret.substring(0, 4) + '***' : 'missing',
+        callbackUrl: process.env.LINKEDIN_CALLBACK_URL || 'missing'
+      });
+    });
     
     // Debug route to check session
     router.get('/session-check', (req, res) => {
@@ -252,25 +266,53 @@ export const initializeAuth = () => {
       
       try {
         console.log('Manually exchanging code for token...');
-        // Exchange code for token manually
-        const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: process.env.LINKEDIN_CALLBACK_URL,
-            client_id: process.env.LINKEDIN_CLIENT_ID,
-            client_secret: process.env.LINKEDIN_CLIENT_SECRET
-          })
+        
+        // Print out credentials being used (redacted)
+        const clientId = process.env.LINKEDIN_CLIENT_ID;
+        const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+        console.log('Using credentials:', {
+          clientIdLength: clientId.length,
+          clientIdFirstFour: clientId.substring(0, 4),
+          clientSecretLength: clientSecret.length,
+          clientSecretFirstFour: clientSecret.substring(0, 4),
+          redirectUri: process.env.LINKEDIN_CALLBACK_URL
         });
         
+        // Construct the exact request body
+        const tokenRequestBody = new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: process.env.LINKEDIN_CALLBACK_URL,
+          client_id: process.env.LINKEDIN_CLIENT_ID,
+          client_secret: process.env.LINKEDIN_CLIENT_SECRET
+        });
+        
+        // Create the detailed request
+        const tokenRequestDetails = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+          },
+          body: tokenRequestBody
+        };
+        
+        console.log('Token request details:', {
+          url: 'https://www.linkedin.com/oauth/v2/accessToken',
+          method: tokenRequestDetails.method,
+          headers: tokenRequestDetails.headers,
+          bodyParams: Object.fromEntries(tokenRequestBody.entries())
+        });
+        
+        // Exchange code for token manually
+        const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', tokenRequestDetails);
+        
+        // Handle failed token exchange
         if (!tokenResponse.ok) {
-          const errorText = await tokenResponse.text();
-          console.error('Token exchange failed:', tokenResponse.status, errorText);
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=token_exchange_failed`);
+          const responseText = await tokenResponse.text();
+          console.error(`Token exchange failed: ${tokenResponse.status} ${responseText}`);
+          
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=token_exchange_failed&details=${encodeURIComponent(responseText)}`);
         }
         
         const tokenData = await tokenResponse.json();
@@ -285,7 +327,8 @@ export const initializeAuth = () => {
         console.log('Fetching LinkedIn profile...');
         const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
           headers: {
-            Authorization: `Bearer ${tokenData.access_token}`
+            Authorization: `Bearer ${tokenData.access_token}`,
+            'Accept': 'application/json'
           }
         });
         
@@ -306,7 +349,8 @@ export const initializeAuth = () => {
         console.log('Fetching email address...');
         const emailResponse = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
           headers: {
-            Authorization: `Bearer ${tokenData.access_token}`
+            Authorization: `Bearer ${tokenData.access_token}`,
+            'Accept': 'application/json'
           }
         });
         
@@ -339,7 +383,7 @@ export const initializeAuth = () => {
         return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
       } catch (error) {
         console.error('Manual verification error:', error);
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Manual verification failed')}`);
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent('Manual verification failed: ' + error.message)}`);
       }
     };
     
