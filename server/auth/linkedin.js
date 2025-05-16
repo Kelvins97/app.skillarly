@@ -42,8 +42,6 @@ export const initializeAuth = () => {
     passport.serializeUser((user, done) => done(null, user));
     passport.deserializeUser((user, done) => done(null, user));
     
-    // Skip the problematic passport strategy and use direct API calls instead
-    
     // Health check route
     router.get('/health', (req, res) => {
       res.status(200).json({ 
@@ -63,12 +61,13 @@ export const initializeAuth = () => {
         req.session.linkedInState = state;
       }
       
-      // Build LinkedIn authorization URL manually
+      // Build LinkedIn authorization URL manually with correct OpenID scopes
       const authUrl = new URL('https://www.linkedin.com/oauth/v2/authorization');
       authUrl.searchParams.append('response_type', 'code');
       authUrl.searchParams.append('client_id', process.env.LINKEDIN_CLIENT_ID);
       authUrl.searchParams.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
       authUrl.searchParams.append('state', state);
+      // Updated scopes to use OpenID Connect
       authUrl.searchParams.append('scope', 'openid profile email');
       
       // Redirect to LinkedIn
@@ -93,7 +92,7 @@ export const initializeAuth = () => {
         
         console.log('Exchanging authorization code for access token');
         
-        // Manually exchange code for token - FIXED CLIENT AUTHENTICATION
+        // Manually exchange code for token
         const tokenRequestBody = new URLSearchParams();
         tokenRequestBody.append('grant_type', 'authorization_code');
         tokenRequestBody.append('code', code);
@@ -134,43 +133,35 @@ export const initializeAuth = () => {
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_access_token`);
         }
         
-        // Get basic profile data
-        const profileResponse = await fetch('https://api.linkedin.com/v2/me', {
-          headers: {
-            'Authorization': `Bearer ${tokenData.access_token}`,
-            'Accept': 'application/json'
-          }
-        });
+        // Using OpenID Connect instead of LinkedIn's v2 API
+        // Get the ID token claims from LinkedIn OpenID
+        const idToken = tokenData.id_token;
         
-        if (!profileResponse.ok) {
-          console.error('Profile fetch failed:', await profileResponse.text());
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=profile_fetch_failed`);
+        if (!idToken) {
+          console.error('No ID token in response - OpenID Connect flow failed');
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_id_token`);
         }
         
-        const profileData = await profileResponse.json();
+        // Decode the ID token to get user information
+        // Note: In production, you should validate the token signature
+        const idTokenParts = idToken.split('.');
+        let decodedToken;
         
-        // Get email address
-        const emailResponse = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
-          headers: {
-            'Authorization': `Bearer ${tokenData.access_token}`,
-            'Accept': 'application/json'
-          }
-        });
-        
-        let email = null;
-        
-        if (emailResponse.ok) {
-          const emailData = await emailResponse.json();
-          email = emailData.elements?.[0]?.['handle~']?.emailAddress;
-        } else {
-          console.warn('Could not fetch email:', await emailResponse.text());
+        try {
+          decodedToken = JSON.parse(Buffer.from(idTokenParts[1], 'base64').toString());
+        } catch (error) {
+          console.error('Failed to decode ID token:', error);
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_id_token`);
         }
         
-        // Create user object
+        // Create user object from OpenID claims
         const user = {
-          id: profileData.id,
-          name: `${profileData.localizedFirstName || ''} ${profileData.localizedLastName || ''}`.trim() || 'LinkedIn User',
-          email: email,
+          id: decodedToken.sub,
+          name: decodedToken.name || 'LinkedIn User',
+          email: decodedToken.email,
+          // Store additional fields if needed
+          givenName: decodedToken.given_name,
+          familyName: decodedToken.family_name,
           accessToken: tokenData.access_token
         };
         
