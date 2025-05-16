@@ -69,7 +69,7 @@ export const initializeAuth = () => {
       authUrl.searchParams.append('client_id', process.env.LINKEDIN_CLIENT_ID);
       authUrl.searchParams.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
       authUrl.searchParams.append('state', state);
-      authUrl.searchParams.append('scope', 'openid profile email');
+      authUrl.searchParams.append('scope', 'r_liteprofile r_emailaddress');
       
       // Redirect to LinkedIn
       res.redirect(authUrl.toString());
