@@ -240,7 +240,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 });
 
 // Fixed: API for user data - protected with auth
-app.get('/api/user-data', verifyAuthToken, async (req, res) => {
+app.get('/user-data', verifyAuthToken, async (req, res) => {
   try {
     const email = req.user.email;
     
