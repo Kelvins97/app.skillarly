@@ -65,6 +65,7 @@ const corsOptions = {
 };
 
 // 4. Middleware Setup
+app.set('trust proxy', 1); // 1 = trust first proxy (Render/Vercel)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
