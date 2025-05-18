@@ -252,7 +252,7 @@ app.get('/api/user-data', verifyAuthToken, async (req, res) => {
       .from('users')
       .select('name, skills, certifications, headline')
       .eq('email', email)
-      .single();
+      .maybeSingle();
     
     if (error || !userData) {
       return res.status(404).json({
@@ -540,7 +540,7 @@ app.post('/scrape-log', verifyAuthToken, async (req, res) => {
       .from('users')
       .select('id')
       .eq('email', email)
-      .single();
+      .maybeSingle();
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
