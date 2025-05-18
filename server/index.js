@@ -14,7 +14,7 @@ import fetch from 'node-fetch';
 import session from 'express-session';
 import passport from 'passport';
 import { initializeAuth } from './auth/linkedin.js';
-import RedisStore from 'connect-redis';
+import connectRedis from 'connect-redis';
 import { createClient } from 'redis';
 import jwt from 'jsonwebtoken';
 import { verifyAuthToken } from './authMiddleware.js';
@@ -75,6 +75,8 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 // 5. Session Configuration
+const RedisStore = connectRedis(session);
+
 app.use(session({
   secret: process.env.SESSION_SECRET,
   store: new RedisStore({ client: redisClient }),
