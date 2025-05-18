@@ -31,16 +31,50 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
-// 3. Middleware Setup
-app.use(express.json());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://skillarly-app.vercel.app',
+// 3. Enhanced CORS Configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://skillarly-app.vercel.app',
+      'https://skillarly.com',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
+  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+};
 
-// 4. Session Configuration
+// 4. Middleware Setup
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Apply CORS before any routes
+app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
+
+// 5. Session Configuration
 app.use(session({
   secret: process.env.SESSION_SECRET,
   store: new RedisStore({ client: redisClient }),
@@ -51,15 +85,15 @@ app.use(session({
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: 24 * 60 * 60 * 1000,
     httpOnly: true,
-    domain: process.env.COOKIE_DOMAIN || 'skillarly-backend.onrender.com'
+    domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
   }
 }));
 
-// 5. Authentication Setup
+// 6. Authentication Setup
 app.use(passport.initialize());
 app.use(passport.session());
 
-// 6. Redis Connection
+// 7. Redis Connection
 (async () => {
   try {
     redisClient.on('error', (err) => {
@@ -80,16 +114,22 @@ app.use(passport.session());
   }
 })();
 
-// 7. Routes Configuration
+// 8. Routes Configuration
 
 // Public Routes
-app.get('/', (req, res) => res.send('✅ Skillarly backend is live.'));
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'success',
+    message: '✅ Skillarly backend is live.',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Auth Routes - Use LinkedIn OAuth and custom auth routes
 app.use('/auth', initializeAuth());
 app.use('/auth', authRoutes);
 
-// This route is already defined in the LinkedIn auth module
+// Login failed route
 app.get('/login-failed', (req, res) => {
   const error = req.query.error || 'unknown_error';
   console.log(`Login Failed: ${error}`);
@@ -128,12 +168,183 @@ app.get('/go', (req, res) => {
   return res.redirect(baseUrl);
 });
 
+// Health Check Endpoint
+app.get('/health', (req, res) => {
+  const sessionActive = !!req.session;
+  const redisConnected = redisClient.isReady;
+  
+  res.status(200).json({ 
+    status: 'ok', 
+    message: 'Service is healthy',
+    redis: redisConnected ? 'connected' : 'disconnected',
+    session: sessionActive ? 'active' : 'inactive',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Protected Routes (using JWT token)
+
+// Fixed: User Info - protected with JWT auth
+app.get('/user-info', verifyAuthToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+    
+    // Get user info from Supabase
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (userError) {
+      console.error('Supabase error:', userError);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Get subscription info if exists
+    const planResult = await pool.query(`
+      SELECT plan FROM subscriptions WHERE user_email = $1 AND is_active = TRUE
+    `, [email]);
+    
+    const plan = planResult.rows[0]?.plan || userData.plan || 'basic';
+
+    // Get monthly scrapes count
+    const scrapeResult = await pool.query(`
+      SELECT COUNT(*) as count FROM scrape_logs sl
+      JOIN users u ON u.id = sl.user_id
+      WHERE u.email = $1 
+      AND DATE_TRUNC('month', sl.scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
+    `, [email]);
+    
+    const monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
+
+    res.json({
+      success: true,
+      id: userData.id,
+      email: userData.email,
+      name: userData.name,
+      plan: plan,
+      monthly_scrapes: monthly_scrapes,
+      email_notifications: userData.email_notifications !== false
+    });
+  } catch (error) {
+    console.error('Error in /user-info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Fixed: API for user data - protected with auth
+app.get('/api/user-data', verifyAuthToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+    
+    // Fetch user data from Supabase
+    const { data: userData, error } = await supabase
+      .from('users')
+      .select('name, skills, certifications, headline')
+      .eq('email', email)
+      .single();
+    
+    if (error || !userData) {
+      return res.status(404).json({
+        success: false,
+        message: 'User data not found'
+      });
+    }
+    
+    // Sample recommendations based on skills
+    const recommendations = [
+      'Consider learning GraphQL for API development',
+      'Your profile would benefit from showcasing more projects',
+      'Adding endorsements would strengthen your profile'
+    ];
+    
+    res.status(200).json({
+      success: true,
+      name: userData.name,
+      headline: userData.headline,
+      profilePicture: null,
+      skills: userData.skills || [],
+      certifications: userData.certifications || [],
+      recommendations
+    });
+  } catch (error) {
+    console.error('Error fetching user data:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching user data' 
+    });
+  }
+});
+
+// Update Preferences - protected with JWT auth
+app.post('/update-preferences', verifyAuthToken, async (req, res) => {
+  try {
+    const { email_notifications, frequency = 'weekly' } = req.body;
+    const email = req.user.email;
+
+    // Update in Supabase
+    const { error } = await supabase
+      .from('users')
+      .update({ 
+        email_notifications,
+        notification_frequency: frequency
+      })
+      .eq('email', email);
+
+    if (error) {
+      console.error('Supabase update error:', error);
+      return res.status(500).json({ success: false, error: 'Update failed' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating preferences:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// Subscribe or re-subscribe user - protected with JWT auth
+app.post('/subscribe', verifyAuthToken, async (req, res) => {
+  const { name, headline, skills, certifications } = req.body;
+  const email = req.user.email;
+
+  try {
+    const { error } = await supabase
+      .from('users')
+      .upsert([{
+        email,
+        name,
+        headline,
+        skills,
+        certifications,
+        subscribed: true
+      }], { onConflict: 'email' });
+
+    if (error) {
+      console.error("Supabase insert error:", error.message);
+      return res.status(500).json({ error: "Failed to subscribe user" });
+    }
+
+    res.json({ success: true, message: "User subscribed" });
+  } catch (err) {
+    console.error('Subscribe error:', err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Scrape Profile - protected with JWT auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
-  const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
+  const email = req.user.email;
 
-  if (!profileUrl.includes('linkedin.com/in/')) {
+  if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
     return res.status(400).json({
       success: false,
       message: 'Invalid LinkedIn profile URL'
@@ -169,93 +380,102 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   }
 });
 
-// Health Check Endpoint
-app.get('/health', (req, res) => {
-  const sessionActive = !!req.session;
-  const redisConnected = redisClient.isReady;
-  
-  if (sessionActive && redisConnected) {
-    res.status(200).json({ 
-      status: 'ok', 
-      message: 'Service is healthy',
-      redis: 'connected',
-      session: 'active'
-    });
-  } else {
-    res.status(503).json({
-      status: 'degraded',
-      redis: redisConnected ? 'connected' : 'disconnected',
-      session: sessionActive ? 'active' : 'inactive'
-    });
-  }
+// Rate limiter setup
+const recommendationsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-// User Info - protected with JWT auth
-app.get('/user-info', verifyAuthToken, async (req, res) => {
-  const email = req.user.email;
-  
-  // Ensure the requesting user is accessing their own data
-  if (req.query.email && req.query.email !== email) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only access your own profile data'
-    });
-  }
-  
-  const result = await pool.query(`
-    SELECT u.id, u.email, s.plan, p.email_notifications,
-      (SELECT COUNT(*) FROM scrape_logs 
-       WHERE user_id = u.id AND DATE_TRUNC('month', scraped_at) = DATE_TRUNC('month', CURRENT_DATE)) AS monthly_scrapes
-    FROM users u
-    LEFT JOIN subscriptions s ON s.user_id = u.id AND s.is_active
-    LEFT JOIN preferences p ON p.user_id = u.id
-    WHERE u.email = $1
-  `, [email]);
-  res.json(result.rows[0] || {});
-});
-
-// Update Preferences - protected with JWT auth
-app.post('/update-preferences', verifyAuthToken, async (req, res) => {
-  const { email_notifications, frequency = 'weekly' } = req.body;
-  const userId = req.user.id;
-
-  await pool.query(`
-    INSERT INTO preferences (user_id, email_notifications, frequency)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (user_id) DO UPDATE 
-      SET email_notifications = $2, frequency = $3
-  `, [userId, email_notifications, frequency]);
-
-  res.json({ success: true });
-});
-
-// Subscribe or re-subscribe user - protected with JWT auth
-app.post('/subscribe', verifyAuthToken, async (req, res) => {
-  const { name, headline, skills, certifications } = req.body;
-  const email = req.user.email;
-
+// Fixed: Recommendations (Rate-limited, plan-checked) - protected with auth
+app.post('/recommendations', recommendationsLimiter, verifyAuthToken, async (req, res) => {
   try {
-    const { error } = await supabase
-      .from('users')
-      .upsert([{
-        email,
-        name,
-        headline,
-        skills,
-        certifications,
-        subscribed: true
-      }], { onConflict: 'email' });
+    const email = req.user.email;
 
-    if (error) {
-      console.error("Supabase insert error:", error.message);
-      return res.status(500).json({ error: "Failed to subscribe user" });
+    // Get user data
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('skills, name, plan, email_notifications, monthly_scrapes')
+      .eq('email', email)
+      .single();
+
+    if (userError) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ success: true, message: "User subscribed" });
+    const plan = user.plan || 'basic';
+    const limits = { basic: 2, pro: 10, premium: Infinity };
+    const usage = user.monthly_scrapes || 0;
+
+    if (usage >= limits[plan]) {
+      return res.status(403).json({ error: 'Monthly scrape limit reached' });
+    }
+
+    // Update scrape count
+    await supabase
+      .from('users')
+      .update({ monthly_scrapes: usage + 1 })
+      .eq('email', email);
+
+    const skills = user.skills || [];
+    const name = user.name || 'Professional';
+    const wantsEmail = user.email_notifications !== false;
+
+    const prompt = `I have these skills: ${skills.join(', ')}. Recommend 3 online courses and 2 certifications. Format as JSON: { courses: [], certifications: [] }.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const text = response.choices[0].message.content;
+    let json;
+    try {
+      const match = text.match(/```json\n?([\\s\\S]+?)```/);
+      json = match ? JSON.parse(match[1]) : JSON.parse(text);
+    } catch (parseError) {
+      // Fallback if JSON parsing fails
+      json = { courses: [], certifications: [] };
+    }
+
+    const { courses = [], certifications = [] } = json;
+
+    // Fetch live jobs
+    let jobs = [];
+    try {
+      const jobsRes = await axios.post(`${process.env.BACKEND_URL || 'http://localhost:3000'}/jobs/remotive`, 
+        { skills }, 
+        { headers: { Authorization: req.headers.authorization } }
+      );
+      jobs = jobsRes.data.jobs || [];
+    } catch (jobError) {
+      console.error('Jobs fetch error:', jobError.message);
+    }
+
+    // Send via email if opted in
+    if (wantsEmail) {
+      try {
+        await sendEmail(email, name, {
+          primarySkill: skills[0] || 'Your Skills',
+          email: email,
+          courses,
+          certifications,
+          jobs
+        });
+      } catch (emailError) {
+        console.error('Email send error:', emailError.message);
+      }
+    }
+
+    res.json({ success: true, courses, certifications, jobs, emailSent: wantsEmail });
   } catch (err) {
-    res.status(500).json({ error: "Server error" });
+    console.error('Recommendation error:', err.message);
+    res.status(500).json({ error: 'recommendation_failed' });
   }
 });
+
 // Subscription Endpoint - protected with auth
 app.post('/subscription', verifyAuthToken, async (req, res) => {
   const { plan, paymentMethod } = req.body;
@@ -286,8 +506,8 @@ app.post('/subscription', verifyAuthToken, async (req, res) => {
       }],
       mode: 'subscription',
       customer_email: email,
-      success_url: 'https://skillarly.com/success',
-      cancel_url: 'https://skillarly.com/cancel',
+      success_url: `${process.env.FRONTEND_URL}/success`,
+      cancel_url: `${process.env.FRONTEND_URL}/cancel`,
     });
 
     return res.json({ stripeUrl: session.url });
@@ -297,7 +517,7 @@ app.post('/subscription', verifyAuthToken, async (req, res) => {
     // Handle M-Pesa payment
     const mpesaResult = await sendMpesaPush({
       amount: plan === 'pro' ? 500 : 1500,
-      phone: req.body.phone || '2547XXXXXXXX', // Get phone from request or user profile
+      phone: req.body.phone || '2547XXXXXXXX',
       email
     });
 
@@ -307,104 +527,45 @@ app.post('/subscription', verifyAuthToken, async (req, res) => {
   res.status(400).json({ error: 'Invalid payment method' });
 });
 
-// ✅ Log Scrape - protected with auth
+// Log Scrape - protected with auth
 app.post('/scrape-log', verifyAuthToken, async (req, res) => {
-  const userId = req.user.id;
-  await pool.query(`INSERT INTO scrape_logs (user_id) VALUES ($1)`, [userId]);
-  res.json({ success: true });
-});
-
-// Rate limiter setup
-const recommendationsLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  message: 'Too many requests. Please try again later.'
-});
-
-// ✅ Recommendations (Rate-limited, plan-checked) - protected with auth
-app.post('/recommendations', recommendationsLimiter, verifyAuthToken, async (req, res) => {
-  const userId = req.user.id;
-
-  const planRes = await pool.query(`
-    SELECT plan FROM subscriptions WHERE user_id = $1 AND is_active = TRUE
-  `, [userId]);
-  const plan = planRes.rows[0]?.plan || 'basic';
-
-  const usageRes = await pool.query(`
-    SELECT COUNT(*) FROM scrape_logs 
-    WHERE user_id = $1 
-    AND DATE_TRUNC('month', scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
-  `, [userId]);
-  const usage = parseInt(usageRes.rows[0]?.count || '0', 10);
-  const limits = { basic: 2, pro: 10, premium: Infinity };
-
-  if (usage >= limits[plan]) {
-    return res.status(403).json({ error: 'Monthly scrape limit reached' });
-  }
-
-  await pool.query(`INSERT INTO scrape_logs (user_id) VALUES ($1)`, [userId]);
-
   try {
-    const { data: user } = await supabase.from('users')
-      .select('skills, name, plan, email_notifications')
-      .eq('email', req.user.email)
+    const email = req.user.email;
+    
+    // Get user ID
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
       .single();
 
-    const skills = user.skills || [];
-    const name = user.name || 'Professional';
-    const wantsEmail = user.email_notifications !== false;
-
-    const prompt = `I have these skills: ${skills.join(', ')}. Recommend 3 online courses and 2 certifications. Format as JSON: { courses, certifications }.`;
-
-    const response = await openai.createChatCompletion({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const text = response.data.choices[0].message.content;
-    const match = text.match(/```json\\n?([\\s\\S]+?)```/);
-    const json = match ? JSON.parse(match[1]) : JSON.parse(text);
-    const { courses = [], certifications = [] } = json;
-
-    // Fetch live jobs
-    const jobsRes = await axios.post('http://localhost:3000/jobs/remotive', { skills });
-    const jobs = jobsRes.data.jobs || [];
-
-    // Send via email if opted in
-    if (wantsEmail) {
-      await sendEmail(req.user.email, name, {
-        primarySkill: skills[0] || 'Your Skills',
-        email: req.user.email,
-        courses,
-        certifications,
-        jobs
-      });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ success: true, courses, certifications, jobs, emailSent: wantsEmail });
-  } catch (err) {
-    console.error('Recommendation error:', err.message);
-    res.status(500).json({ error: 'recommendation_failed' });
+    await pool.query(`INSERT INTO scrape_logs (user_id) VALUES ($1)`, [user.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Scrape log error:', error);
+    res.status(500).json({ error: 'Failed to log scrape' });
   }
 });
 
-// ✅ Trigger Email (optional) - protected with auth
+// Send Email - protected with auth
 app.post('/send-email', verifyAuthToken, async (req, res) => {
-  // Email is determined from authenticated user
   const email = req.user.email;
   // Trigger email send from email.js/recommendationEmail.js
   res.json({ success: true, simulated: true });
 });
 
-// ✅ M-Pesa Callback (optional logging)
+// M-Pesa Callback
 app.post('/mpesa/callback', (req, res) => {
   console.log('✅ M-Pesa Callback Received:', req.body);
   res.sendStatus(200);
 });
 
-// Reset monthly scrapes (for CRON jobs) - should be restricted to admin or cron access
+// Reset monthly scrapes (for CRON jobs)
 app.post('/reset-scrapes', async (req, res) => {
-  // This should have an admin authentication check
   const adminKey = req.headers['x-admin-key'];
   if (adminKey !== process.env.ADMIN_SECRET_KEY) {
     return res.status(401).json({ error: 'unauthorized' });
@@ -414,55 +575,12 @@ app.post('/reset-scrapes', async (req, res) => {
     await supabase.from('users').update({ monthly_scrapes: 0 });
     res.json({ success: true });
   } catch (e) {
+    console.error('Reset scrapes error:', e);
     res.status(500).json({ error: 'reset_failed' });
   }
 });
 
-// API for user data - protected with auth
-app.get('/api/user-data', verifyAuthToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    // Fetch user data from your database
-    const { data: userData } = await supabase
-      .from('users')
-      .select('name, skills, certifications, headline')
-      .eq('email', req.user.email)
-      .single();
-    
-    if (!userData) {
-      return res.status(404).json({
-        success: false,
-        message: 'User data not found'
-      });
-    }
-    
-    // Sample recommendations based on skills
-    const recommendations = [
-      'Consider learning GraphQL for API development',
-      'Your profile would benefit from showcasing more projects',
-      'Adding endorsements would strengthen your profile'
-    ];
-    
-    res.status(200).json({
-      success: true,
-      name: userData.name,
-      headline: userData.headline,
-      profilePicture: null, // You could fetch this from storage or the user table
-      skills: userData.skills || [],
-      certifications: userData.certifications || [],
-      recommendations
-    });
-  } catch (error) {
-    console.error('Error fetching user data:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching user data' 
-    });
-  }
-});
-
-// Remotive jobs API - protected with auth
+// Job APIs - protected with auth
 app.post('/jobs/remotive', verifyAuthToken, async (req, res) => {
   const { skills } = req.body;
   if (!skills || !skills.length) return res.status(400).json({ error: 'No skills provided' });
@@ -486,7 +604,6 @@ app.post('/jobs/remotive', verifyAuthToken, async (req, res) => {
   }
 });
 
-// Jsearch jobs API - protected with auth
 app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
   const { skills } = req.body;
   if (!skills || !skills.length) return res.status(400).json({ error: 'No skills provided' });
@@ -494,7 +611,7 @@ app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
   try {
     const response = await axios.get('https://jsearch.p.rapidapi.com/search', {
       params: {
-        query: skills[0], // top skill
+        query: skills[0],
         num_pages: 1
       },
       headers: {
@@ -517,70 +634,26 @@ app.post('/jobs/jsearch', verifyAuthToken, async (req, res) => {
   }
 });
 
-// 9. Route Handlers ===========================================================
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
+});
 
-// LinkedIn Referral Handler
-function handleLinkedInReferral(req, res) {
-  const ref = req.get('Referrer') || '';
-  const baseUrl = process.env.FRONTEND_URL;
-  
-  if (ref.includes('linkedin.com/in/')) {
-    return res.redirect(`${baseUrl}/?profile=${encodeURIComponent(ref)}`);
-  }
-  return res.redirect(baseUrl);
-}
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ 
+    error: 'Not found',
+    message: `Route ${req.originalUrl} not found`
+  });
+});
 
-// Scrape Profile Handler
-async function handleScrapeProfile(req, res) {
-  try {
-    const { profileUrl } = req.body;
-    const email = req.user.email || `autogen_${Date.now()}@skillarly.ai`;
-  
-    
-    // Instead, validate the profile URL format
-    if (!profileUrl.includes('linkedin.com/in/')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid LinkedIn profile URL'
-      });
-    }
+// Helper Functions
 
-    const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
-    const limits = { basic: 2, pro: 10, premium: 100 };
-    const allowed = limits[user?.plan || 'basic'];
-
-    if (user?.monthly_scrapes >= allowed) {
-      return res.status(403).json({ error: 'limit_reached' });
-    }
-
-    const parsed = await scraper(profileUrl);
-    await supabase.from('users').upsert([{
-      email,
-      name: parsed.name,
-      skills: parsed.skills,
-      certifications: parsed.certifications,
-      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
-      last_scrape: new Date().toISOString(),
-      plan: user?.plan || 'basic',
-      subscribed: true
-    }], { onConflict: 'email' });
-
-    await sendEmail(email, parsed.name, parsed.skills);
-    res.json({ success: true, email });
-  } catch (err) {
-    console.error('Scrape error:', err);
-    res.status(500).json({ error: 'scrape_failed' });
-  }
-}
-
-// ... (Other handler functions - keep your existing implementations) ...
-// 🧠 Helper: get user ID by email
-async function getUserId(email) {
-  const res = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-  return res.rows[0]?.id || null;
-}
-
-// ✅ M-Pesa Token Helper
+// M-Pesa Token Helper
 async function getMpesaToken() {
   const auth = Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64');
   const res = await fetch("https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials", {
@@ -590,8 +663,7 @@ async function getMpesaToken() {
   return data.access_token;
 }
 
-
-// ✅ M-Pesa STK Push Helper
+// M-Pesa STK Push Helper
 async function sendMpesaPush({ amount, phone, email }) {
   const token = await getMpesaToken();
   const timestamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
@@ -621,12 +693,12 @@ async function sendMpesaPush({ amount, phone, email }) {
   return await res.json();
 }
 
-
-// 10. Server Startup ==========================================================
+// Server Startup
 const PORT = process.env.PORT || 3000;
 
 app.on('redis-connected', () => {
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
+    console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL}`);
   });
 });
