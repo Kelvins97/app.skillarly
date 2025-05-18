@@ -77,6 +77,8 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 // 5. Session Configuration
+const redisClient = new Redis();
+
 const store = new RedisStore({
   client: redisClient,
   prefix: 'sess:',
