@@ -15,7 +15,7 @@ const app = express();
 
 // Configure CORS with correct credentials settings
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://skillarly.vercel.app',
+  origin: process.env.FRONTEND_URL || 'https://skillarly-app.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -140,7 +140,7 @@ const startServer = async () => {
     // Start the server
     app.listen(PORT, () => {
       console.log(`✅ Auth server running on port ${PORT}`);
-      console.log(`✅ CORS enabled for origin: ${process.env.FRONTEND_URL || 'https://skillarly.vercel.app'}`);
+      console.log(`✅ CORS enabled for origin: ${process.env.FRONTEND_URL || 'https://skillarly-app.vercel.app'}`);
       console.log(`✅ Session store type: ${redisClient?.isReady ? 'Redis' : 'In-memory'}`);
     });
   } catch (error) {
