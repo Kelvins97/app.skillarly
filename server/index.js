@@ -14,8 +14,7 @@ import fetch from 'node-fetch';
 import session from 'express-session';
 import passport from 'passport';
 import { initializeAuth } from './auth/linkedin.js';
-import Redis from 'ioredis';
-import connectRedis from 'connect-redis';
+import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
 import jwt from 'jsonwebtoken';
 import { verifyAuthToken } from './authMiddleware.js';
@@ -66,7 +65,6 @@ const corsOptions = {
 };
 
 // 4. Middleware Setup
-app.set('trust proxy', 1); // 1 = trust first proxy (Render/Vercel)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -77,13 +75,6 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 // 5. Session Configuration
-//const redisClient = new Redis();
-
-const store = new RedisStore({
-  client: redisClient,
-  prefix: 'sess:',
-});
-
 app.use(session({
   secret: process.env.SESSION_SECRET,
   store: new RedisStore({ client: redisClient }),
@@ -258,7 +249,7 @@ app.get('/api/user-data', verifyAuthToken, async (req, res) => {
       .from('users')
       .select('name, skills, certifications, headline')
       .eq('email', email)
-      .maybeSingle();
+      .single();
     
     if (error || !userData) {
       return res.status(404).json({
@@ -546,7 +537,7 @@ app.post('/scrape-log', verifyAuthToken, async (req, res) => {
       .from('users')
       .select('id')
       .eq('email', email)
-      .maybeSingle();
+      .single();
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
