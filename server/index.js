@@ -34,7 +34,7 @@ const redisClient = createClient({ url: process.env.REDIS_URL });
 // 3. Middleware Setup
 app.use(express.json());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://skillarly.vercel.app',
+  origin: process.env.CORS_ORIGIN || 'https://skillarly-app.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
