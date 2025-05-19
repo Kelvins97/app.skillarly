@@ -351,9 +351,10 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
 // Scrape Profile - protected with JWT auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
-  const email = 'klvnkngth@gmail.com';
+  const email = req.user.email;
 
-  if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
+
+if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
     return res.status(400).json({
       success: false,
       message: 'Invalid LinkedIn profile URL'
@@ -370,9 +371,11 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     success: false,
     message: 'Missing or invalid email from auth token'
   });
+
+  console.log('📧 Upserting user for email:', email);
+
  }
-   
-console.log('📧 Upserting user for email:', email);
+  
 
 await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
 
