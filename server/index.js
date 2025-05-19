@@ -353,8 +353,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email;
 
-
-if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
+  if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
     return res.status(400).json({
       success: false,
       message: 'Invalid LinkedIn profile URL'
@@ -362,91 +361,117 @@ if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
   }
 
   try {
-    // 1. Ensure user exists (safe upsert)
+    // 1. Validate email
     console.log('SCRAPE START for email:', email);
 
-  if (!email || typeof email !== 'string' || email.trim() === '') {
-  console.error('🚨 Invalid or missing email:', email);
-  return res.status(400).json({
-    success: false,
-    message: 'Missing or invalid email from auth token'
-  });
-
-  console.log('📧 Upserting user for email:', email);
-
- }
-  
-
-await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
-
-const { data: upsertResult, error: upsertError } = await supabase
-.from('users')
-.select('*')
-.eq('email', email);
-
-   console.log('UPSERT FETCH result:', upsertResult);
-   if (upsertError) console.error('UPSERT ERROR:', upsertError);
-
-
-    // 2. Fetch user safely (no `.single()`!)
-    const { data: users, error: fetchError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', email)
-      .limit(1);
-
-    const user = users?.[0] || null;
-
-    if (!user) {
-      console.error('No user found after upsert:', fetchError);
-      return res.status(404).json({
+    if (!email || typeof email !== 'string' || email.trim() === '') {
+      console.error('🚨 Invalid or missing email:', email);
+      return res.status(400).json({
         success: false,
-        message: 'User not found after upsert'
+        message: 'Missing or invalid email from auth token'
       });
     }
 
+    console.log('📧 Upserting user for email:', email);
+
+    // 2. Upsert user and return the record in one operation
+    const { data: upsertResult, error: upsertError } = await supabase
+      .from('users')
+      .upsert([{ email }], { 
+        onConflict: 'email',
+        returning: 'representation' // This ensures we get the record back
+      })
+      .select('*');
+
+    if (upsertError) {
+      console.error('UPSERT ERROR:', upsertError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create/update user',
+        error: upsertError.message
+      });
+    }
+
+    console.log('UPSERT result:', upsertResult);
+
+    // 3. Get the user from upsert result
+    const user = upsertResult?.[0];
+
+    if (!user) {
+      console.error('No user returned from upsert');
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create/retrieve user'
+      });
+    }
+
+    console.log('User found/created:', { id: user.id, email: user.email });
+
+    // 4. Check plan limits
     const plan = user.plan || 'basic';
     const limits = { basic: 2, pro: 10, premium: 100 };
     const allowed = limits[plan];
 
     if ((user?.monthly_scrapes || 0) >= allowed) {
-      return res.status(403).json({ error: 'limit_reached' });
+      return res.status(403).json({ 
+        success: false,
+        error: 'limit_reached',
+        message: `Monthly limit of ${allowed} scrapes reached for ${plan} plan`
+      });
     }
 
-    // 3. Scrape LinkedIn profile
+    // 5. Scrape LinkedIn profile
+    console.log('Starting LinkedIn scrape for URL:', profileUrl);
     const parsed = await scraper(profileUrl);
+    console.log('Scrape completed. Parsed data keys:', Object.keys(parsed));
 
-    console.log('Parsed data:', parsed);
+    // 6. Update user with scraped data
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        name: parsed.name,
+        title: parsed.title,
+        location: parsed.location,
+        skills: parsed.skills,
+        certifications: parsed.certifications,
+        companies: parsed.companies,
+        education: parsed.education,
+        profilepicture: parsed.profilePicture || parsed.profilepicture || null,
+        connections: parsed.connections ? parseInt(parsed.connections) : null,
+        monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
+        last_scrape: new Date().toISOString()
+      })
+      .eq('email', email);
 
-    // 4. Upsert scraped data
-    await supabase.from('users').upsert([{
-      email,
-      name: parsed.name,
-      title: parsed.title,
-      location: parsed.location,
-      skills: parsed.skills,
-      certifications: parsed.certifications,
-      companies: parsed.companies,
-      education: parsed.education,
-      profilepicture: parsed.profilePicture || parsed.profilepicture || null,
-      connections: parsed.connections ? parseInt(parsed.connections) : null,
-      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
-      last_scrape: new Date().toISOString(),
-      plan,
-      subscribed: true
-    }], { onConflict: 'email' });
-
-    // 5. Log scrape event
-    if (user?.id) {
-      await supabase.from('scrape_logs').insert([{ user_id: user.id }]);
-    } else {
-      console.warn(`No user ID found to log scrape for email: ${email}`);
+    if (updateError) {
+      console.error('Failed to update user with scraped data:', updateError);
+      // Don't return error here, we still want to return the scraped data
     }
 
-    // 6. Optional: send email
-    await sendEmail(email, parsed.name, parsed.skills);
+    // 7. Log scrape event
+    if (user?.id) {
+      const { error: logError } = await supabase
+        .from('scrape_logs')
+        .insert([{ 
+          user_id: user.id,
+          profile_url: profileUrl,
+          scraped_at: new Date().toISOString()
+        }]);
+      
+      if (logError) {
+        console.warn('Failed to log scrape event:', logError);
+      }
+    }
 
-    // 7. Return the response
+    // 8. Send email notification (optional)
+    try {
+      await sendEmail(email, parsed.name, parsed.skills);
+    } catch (emailError) {
+      console.warn('Failed to send email notification:', emailError);
+      // Don't fail the request if email fails
+    }
+
+    // 9. Return success response
     res.json({
       success: true,
       email,
@@ -460,6 +485,11 @@ const { data: upsertResult, error: upsertError } = await supabase
         education: parsed.education,
         profilepicture: parsed.profilePicture || parsed.profilepicture || null,
         connections: parsed.connections
+      },
+      meta: {
+        scrapes_used: (user?.monthly_scrapes || 0) + 1,
+        scrapes_allowed: allowed,
+        plan: plan
       }
     });
 
@@ -468,7 +498,8 @@ const { data: upsertResult, error: upsertError } = await supabase
     res.status(500).json({
       success: false,
       error: 'scrape_failed',
-      message: err.message
+      message: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
