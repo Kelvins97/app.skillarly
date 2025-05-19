@@ -192,7 +192,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
     // Get user info from Supabase
     const { data: userData, error } = await supabase
       .from('users')
-      .select('id, email, name, email_notifications, plan, profilePicture')
+      .select('id, email, name, email_notifications, plan, profilepicture')
       .eq('email', email)
       .single();
 
@@ -229,7 +229,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       plan: plan,
       monthly_scrapes: monthly_scrapes,
       email_notifications: userData.email_notifications !== false,
-      profilePicture: userData.profilePicture || null
+      profilepicture: userData.profilepicture || null
     });
 
   } catch (error) {
@@ -250,7 +250,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
     // Fetch user data from Supabase
     const { data: userData, error } = await supabase
       .from('users')
-      .select('name, skills, certifications, headline, profilePicture')
+      .select('name, skills, certifications, headline, profilepicture')
       .eq('email', email)
       .single();
     
@@ -272,7 +272,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
       success: true,
       name: userData.name,
       headline: userData.headline,
-      profilePicture: userData.profilePicture || null,
+      profilepicture: userData.profilepicture || null,
       skills: userData.skills || [],
       certifications: userData.certifications || [],
       recommendations
@@ -371,7 +371,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   name: parsed.name,
   skills: parsed.skills,
   certifications: parsed.certifications,
-  profilePicture: parsed.profilePicture || null,
+  profilepicture: parsed.profilepicture || null,
   monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
   last_scrape: new Date().toISOString(),
   plan: user?.plan || 'basic',
