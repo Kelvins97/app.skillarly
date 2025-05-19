@@ -344,6 +344,7 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
 });
 
 // Scrape Profile - protected with JWT auth
+// Scrape Profile - protected with JWT auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email;
@@ -356,7 +357,8 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   }
     
   try {
-    const { data: user } = await supabase.from('users').select('*').eq('email', email).single();
+    const { data: users, error: userError } = await supabase.from('users').select('*').eq('email', email);
+    const user = users?.[0] || null;
     const limits = { basic: 2, pro: 10, premium: 100 };
     const allowed = limits[user?.plan || 'basic'];
 
@@ -364,26 +366,53 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
       return res.status(403).json({ error: 'limit_reached' });
     }
 
-  const parsed = await scraper(profileUrl);
-  console.log('Parsed data:', parsed);
-  await supabase.from('users').upsert([{
-  email,
-  name: parsed.name,
-  skills: parsed.skills,
-  certifications: parsed.certifications,
-  profilepicture: parsed.profilepicture || null,
-  monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
-  last_scrape: new Date().toISOString(),
-  plan: user?.plan || 'basic',
-  subscribed: true
-  }], { onConflict: 'email' });
+    const parsed = await scraper(profileUrl);
+    console.log('Parsed data:', parsed);
+    
+    // Save all the scraped data to the database
+    await supabase.from('users').upsert([{
+      email,
+      name: parsed.name,
+      title: parsed.title, // Job title/headline
+      location: parsed.location, // Geographic location
+      skills: parsed.skills, // Array of skills
+      certifications: parsed.certifications, // Array of certifications
+      companies: parsed.companies, // Array of companies/work experience
+      education: parsed.education, // Array of education institutions
+      profilepicture: parsed.profilepicture || null, // Profile picture URL
+      connections: parsed.connections ? parseInt(parsed.connections) : null, // Connection count as integer
+      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
+      last_scrape: new Date().toISOString(),
+      plan: user?.plan || 'basic',
+      subscribed: true
+    }], { onConflict: 'email' });
 
-
+    // Send email with the scraped data
     await sendEmail(email, parsed.name, parsed.skills);
-    res.json({ success: true, email });
+    
+    // Return success with all the scraped data
+    res.json({ 
+      success: true, 
+      email,
+      data: {
+        name: parsed.name,
+        title: parsed.title,
+        location: parsed.location,
+        skills: parsed.skills,
+        certifications: parsed.certifications,
+        companies: parsed.companies,
+        education: parsed.education,
+        profilepicture: parsed.profilepicture,
+        connections: parsed.connections
+      }
+    });
   } catch (err) {
     console.error('Scrape error:', err);
-    res.status(500).json({ error: 'scrape_failed' });
+    res.status(500).json({ 
+      success: false,
+      error: 'scrape_failed',
+      message: err.message 
+    });
   }
 });
 
