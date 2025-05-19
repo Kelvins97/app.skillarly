@@ -183,42 +183,43 @@ app.get('/health', (req, res) => {
 });
 
 // Protected Routes (using JWT token)
-
-// Fixed: User Info - protected with JWT auth
-app.get('/user-info', verifyAuthToken, async (req, res) => { 
+//user-info
+app.get('/user-info', verifyAuthToken, async (req, res) => {
   try {
     const email = req.user.email;
-    
-    // Get user info from Supabase
-    const { data: userData, error } = await supabase
+
+    // Fetch user safely
+    const { data: users, error: fetchError } = await supabase
       .from('users')
       .select('id, email, name, email_notifications, plan, profilepicture')
       .eq('email', email)
-      .single();
+      .limit(1);
 
-    if (error) {
-      console.error('Supabase error:', error);
+    const userData = users?.[0] || null;
+
+    if (!userData) {
+      console.error('Supabase: No user found');
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    // Get subscription info if exists
+    // Get subscription info
     const planResult = await pool.query(`
       SELECT plan FROM subscriptions WHERE user_email = $1 AND is_active = TRUE
     `, [email]);
-    
+
     const plan = planResult.rows[0]?.plan || userData.plan || 'basic';
 
-    // Get monthly scrapes count
+    // Count monthly scrapes
     const scrapeResult = await pool.query(`
       SELECT COUNT(*) as count FROM scrape_logs sl
       JOIN users u ON u.id = sl.user_id
       WHERE u.email = $1 
       AND DATE_TRUNC('month', sl.scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
     `, [email]);
-    
+
     const monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
 
     res.json({
@@ -226,8 +227,8 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       id: userData.id,
       email: userData.email,
       name: userData.name,
-      plan: plan,
-      monthly_scrapes: monthly_scrapes,
+      plan,
+      monthly_scrapes,
       email_notifications: userData.email_notifications !== false,
       profilepicture: userData.profilepicture || null
     });
@@ -242,32 +243,34 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 });
 
 
-// Fixed: API for user data - protected with auth
+//user-data
 app.get('/user-data', verifyAuthToken, async (req, res) => {
   try {
     const email = req.user.email;
-    
-    // Fetch user data from Supabase
-    const { data: userData, error } = await supabase
+
+    // Fetch user data safely
+    const { data: users, error: fetchError } = await supabase
       .from('users')
       .select('name, skills, certifications, headline, profilepicture')
       .eq('email', email)
-      .single();
-    
-    if (error || !userData) {
+      .limit(1);
+
+    const userData = users?.[0] || null;
+
+    if (!userData) {
       return res.status(404).json({
         success: false,
         message: 'User data not found'
       });
     }
-    
-    // Sample recommendations based on skills
+
+    // Sample recommendations (can be dynamic later)
     const recommendations = [
       'Consider learning GraphQL for API development',
       'Your profile would benefit from showcasing more projects',
       'Adding endorsements would strengthen your profile'
     ];
-    
+
     res.status(200).json({
       success: true,
       name: userData.name,
@@ -277,14 +280,16 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
       certifications: userData.certifications || [],
       recommendations
     });
+
   } catch (error) {
     console.error('Error fetching user data:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching user data' 
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching user data'
     });
   }
 });
+
 
 
 // Update Preferences - protected with JWT auth
