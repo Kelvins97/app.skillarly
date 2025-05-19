@@ -364,12 +364,22 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     // 1. Ensure user exists (safe upsert)
     console.log('SCRAPE START for email:', email);
 
-    await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
+  if (!email || typeof email !== 'string' || email.trim() === '') {
+  console.error('🚨 Invalid or missing email:', email);
+  return res.status(400).json({
+    success: false,
+    message: 'Missing or invalid email from auth token'
+  });
+ }
+   
+console.log('📧 Upserting user for email:', email);
 
-    const { data: upsertResult, error: upsertError } = await supabase
-   .from('users')
-   .select('*')
-   .eq('email', email);
+await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
+
+const { data: upsertResult, error: upsertError } = await supabase
+.from('users')
+.select('*')
+.eq('email', email);
 
    console.log('UPSERT FETCH result:', upsertResult);
    if (upsertError) console.error('UPSERT ERROR:', upsertError);
