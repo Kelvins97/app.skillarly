@@ -481,7 +481,7 @@ app.post('/recommendations', recommendationsLimiter, verifyAuthToken, async (req
       .from('users')
       .select('skills, name, plan, email_notifications, monthly_scrapes')
       .eq('email', email)
-      .single();
+      .limit(1);
 
     if (userError) {
       return res.status(404).json({ error: 'User not found' });
@@ -619,7 +619,7 @@ app.post('/scrape-log', verifyAuthToken, async (req, res) => {
       .from('users')
       .select('id')
       .eq('email', email)
-      .single();
+      .limit(1);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
