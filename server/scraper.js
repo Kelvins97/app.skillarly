@@ -23,9 +23,9 @@ export default async function scrapeLinkedInProfile(profileUrl) {
   );
 
   // Scrape profile picture URL
-  let profilePicture = null;
+  let profilepicture = null;
   try {
-    profilePicture = await page.$eval('.pv-top-card-profile-picture__image, .profile-photo-edit__preview', el =>
+    profilepicture = await page.$eval('.pv-top-card-profile-picture__image, .profile-photo-edit__preview', el =>
       el.getAttribute('src')
     );
   } catch (err) {
@@ -34,6 +34,5 @@ export default async function scrapeLinkedInProfile(profileUrl) {
 
   await browser.close();
 
-  return { name, skills, certifications, profilePicture };
+  return { name, skills, certifications, profilepicture };
 }
-
