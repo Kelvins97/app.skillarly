@@ -351,7 +351,7 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
 // Scrape Profile - protected with JWT auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
-  const email = req.user.email;
+  const email = 'klvnkngth@gmail.com';
 
   if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
     return res.status(400).json({
