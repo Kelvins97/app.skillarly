@@ -89,4 +89,5 @@ router.get('/linkedin/callback', async (req, res) => {
   }
 });
 
-export default router;
+export const initializeAuth = () => router;
+
