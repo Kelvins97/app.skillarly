@@ -362,7 +362,18 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
 
   try {
     // 1. Ensure user exists (safe upsert)
+    console.log('SCRAPE START for email:', email);
+
     await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
+
+    const { data: upsertResult, error: upsertError } = await supabase
+   .from('users')
+   .select('*')
+   .eq('email', email);
+
+   console.log('UPSERT FETCH result:', upsertResult);
+   if (upsertError) console.error('UPSERT ERROR:', upsertError);
+
 
     // 2. Fetch user safely (no `.single()`!)
     const { data: users, error: fetchError } = await supabase
@@ -391,6 +402,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
 
     // 3. Scrape LinkedIn profile
     const parsed = await scraper(profileUrl);
+
     console.log('Parsed data:', parsed);
 
     // 4. Upsert scraped data
