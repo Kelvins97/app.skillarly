@@ -344,7 +344,6 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
 });
 
 // Scrape Profile - protected with JWT auth
-// Scrape Profile - protected with JWT auth
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email;
@@ -355,44 +354,64 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
       message: 'Invalid LinkedIn profile URL'
     });
   }
-    
-  try {
-    const { data: users, error: userError } = await supabase.from('users').select('*').eq('email', email);
-    const user = users?.[0] || null;
-    const limits = { basic: 2, pro: 10, premium: 100 };
-    const allowed = limits[user?.plan || 'basic'];
 
-    if (user?.monthly_scrapes >= allowed) {
+  try {
+    // Ensure user exists — upsert first (minimal insert)
+    await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
+
+    // Fetch user (null-safe)
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new Error(`User fetch error: ${fetchError.message}`);
+    }
+
+    const plan = user?.plan || 'basic';
+    const allowedScrapes = { basic: 2, pro: 10, premium: 100 }[plan];
+
+    if ((user?.monthly_scrapes || 0) >= allowedScrapes) {
       return res.status(403).json({ error: 'limit_reached' });
     }
 
+    // Scrape data from LinkedIn
     const parsed = await scraper(profileUrl);
     console.log('Parsed data:', parsed);
-    
-    // Save all the scraped data to the database
+
+    // Save scraped data
     await supabase.from('users').upsert([{
       email,
       name: parsed.name,
-      title: parsed.title, // Job title/headline
-      location: parsed.location, // Geographic location
-      skills: parsed.skills, // Array of skills
-      certifications: parsed.certifications, // Array of certifications
-      companies: parsed.companies, // Array of companies/work experience
-      education: parsed.education, // Array of education institutions
-      profilepicture: parsed.profilepicture || null, // Profile picture URL
-      connections: parsed.connections ? parseInt(parsed.connections) : null, // Connection count as integer
+      title: parsed.title,
+      location: parsed.location,
+      skills: parsed.skills,
+      certifications: parsed.certifications,
+      companies: parsed.companies,
+      education: parsed.education,
+      profilepicture: parsed.profilePicture || parsed.profilepicture || null, // double-safe
+      connections: parsed.connections ? parseInt(parsed.connections) : null,
       monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
       last_scrape: new Date().toISOString(),
-      plan: user?.plan || 'basic',
+      plan,
       subscribed: true
     }], { onConflict: 'email' });
 
-    // Send email with the scraped data
+  if (user?.id) {
+  await supabase.from('scrape_logs').insert([{ user_id: user.id }]);
+  } else {
+  console.warn(`Could not log scrape — user ID not available for ${email}`);
+  }
+
+
+    // Optional: send email notification
     await sendEmail(email, parsed.name, parsed.skills);
-    
-    // Return success with all the scraped data
-    res.json({ 
-      success: true, 
+
+    // Respond with parsed data
+    res.json({
+      success: true,
       email,
       data: {
         name: parsed.name,
@@ -402,19 +421,21 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
         certifications: parsed.certifications,
         companies: parsed.companies,
         education: parsed.education,
-        profilepicture: parsed.profilepicture,
+        profilepicture: parsed.profilePicture || parsed.profilepicture || null,
         connections: parsed.connections
       }
     });
+
   } catch (err) {
     console.error('Scrape error:', err);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: 'scrape_failed',
-      message: err.message 
+      message: err.message
     });
   }
 });
+
 
 // Rate limiter setup
 const recommendationsLimiter = rateLimit({
