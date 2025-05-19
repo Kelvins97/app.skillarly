@@ -185,19 +185,19 @@ app.get('/health', (req, res) => {
 // Protected Routes (using JWT token)
 
 // Fixed: User Info - protected with JWT auth
-app.get('/user-info', verifyAuthToken, async (req, res) => {
+app.get('/user-info', verifyAuthToken, async (req, res) => { 
   try {
     const email = req.user.email;
     
     // Get user info from Supabase
-    const { data: userData, error: userError } = await supabase
+    const { data: userData, error } = await supabase
       .from('users')
-      .select('*')
+      .select('id, email, name, email_notifications, plan, profilePicture')
       .eq('email', email)
       .single();
 
-    if (userError) {
-      console.error('Supabase error:', userError);
+    if (error) {
+      console.error('Supabase error:', error);
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -228,8 +228,10 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       name: userData.name,
       plan: plan,
       monthly_scrapes: monthly_scrapes,
-      email_notifications: userData.email_notifications !== false
+      email_notifications: userData.email_notifications !== false,
+      profilePicture: userData.profilePicture || null
     });
+
   } catch (error) {
     console.error('Error in /user-info:', error);
     res.status(500).json({
@@ -239,6 +241,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
   }
 });
 
+
 // Fixed: API for user data - protected with auth
 app.get('/user-data', verifyAuthToken, async (req, res) => {
   try {
@@ -247,7 +250,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
     // Fetch user data from Supabase
     const { data: userData, error } = await supabase
       .from('users')
-      .select('name, skills, certifications, headline')
+      .select('name, skills, certifications, headline, profilePicture')
       .eq('email', email)
       .single();
     
@@ -269,7 +272,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
       success: true,
       name: userData.name,
       headline: userData.headline,
-      profilePicture: null,
+      profilePicture: userData.profilePicture || null,
       skills: userData.skills || [],
       certifications: userData.certifications || [],
       recommendations
@@ -282,6 +285,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
     });
   }
 });
+
 
 // Update Preferences - protected with JWT auth
 app.post('/update-preferences', verifyAuthToken, async (req, res) => {
@@ -360,17 +364,19 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
       return res.status(403).json({ error: 'limit_reached' });
     }
 
-    const parsed = await scraper(profileUrl);
-    await supabase.from('users').upsert([{
-      email,
-      name: parsed.name,
-      skills: parsed.skills,
-      certifications: parsed.certifications,
-      monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
-      last_scrape: new Date().toISOString(),
-      plan: user?.plan || 'basic',
-      subscribed: true
-    }], { onConflict: 'email' });
+  const parsed = await scraper(profileUrl);
+  await supabase.from('users').upsert([{
+  email,
+  name: parsed.name,
+  skills: parsed.skills,
+  certifications: parsed.certifications,
+  profilePicture: parsed.profilePicture || null,
+  monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
+  last_scrape: new Date().toISOString(),
+  plan: user?.plan || 'basic',
+  subscribed: true
+  }], { onConflict: 'email' });
+
 
     await sendEmail(email, parsed.name, parsed.skills);
     res.json({ success: true, email });
