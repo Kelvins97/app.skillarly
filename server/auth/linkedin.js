@@ -14,88 +14,11 @@ const generateSecureToken = (user) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      profilePicture: user.profilePicture, // Add profile picture to JWT
       exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24) // 24 hours
     },
     process.env.JWT_SECRET,
     { algorithm: 'HS256' }
   );
-};
-
-// Function to fetch LinkedIn profile picture
-const fetchLinkedInProfilePicture = async (accessToken) => {
-  try {
-    console.log('Fetching profile picture from LinkedIn API');
-    
-    // LinkedIn v2 API endpoint for profile pictures
-    const profilePictureResponse = await fetch('https://api.linkedin.com/v2/me?projection=(id,profilePicture(displayImage~:playableStreams))', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json',
-        'LinkedIn-Version': '202305'
-      }
-    });
-    
-    if (profilePictureResponse.ok) {
-      const pictureData = await profilePictureResponse.json();
-      console.log('Profile picture data structure:', JSON.stringify(pictureData, null, 2));
-      
-      // Extract the profile picture URL from the complex nested structure
-      const profilePicture = pictureData.profilePicture;
-      if (profilePicture && profilePicture['displayImage~'] && profilePicture['displayImage~'].elements) {
-        const elements = profilePicture['displayImage~'].elements;
-        
-        // Get the largest available image (usually the last one in the array)
-        const largestImage = elements[elements.length - 1];
-        if (largestImage && largestImage.identifiers && largestImage.identifiers.length > 0) {
-          const imageUrl = largestImage.identifiers[0].identifier;
-          console.log('Profile picture URL found:', imageUrl);
-          return imageUrl;
-        }
-      }
-    } else {
-      console.log('Could not fetch profile picture:', profilePictureResponse.status);
-    }
-  } catch (error) {
-    console.error('Error fetching profile picture:', error);
-  }
-  
-  return null;
-};
-
-// Function to fetch email address separately (if needed)
-const fetchLinkedInEmail = async (accessToken) => {
-  try {
-    console.log('Fetching email from LinkedIn API');
-    
-    const emailResponse = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json',
-        'LinkedIn-Version': '202305'
-      }
-    });
-    
-    if (emailResponse.ok) {
-      const emailData = await emailResponse.json();
-      console.log('Email data:', JSON.stringify(emailData, null, 2));
-      
-      if (emailData.elements && emailData.elements.length > 0) {
-        const emailElement = emailData.elements[0];
-        if (emailElement['handle~'] && emailElement['handle~'].emailAddress) {
-          const email = emailElement['handle~'].emailAddress;
-          console.log('Email found:', email);
-          return email;
-        }
-      }
-    } else {
-      console.log('Could not fetch email:', emailResponse.status);
-    }
-  } catch (error) {
-    console.error('Error fetching email:', error);
-  }
-  
-  return null;
 };
 
 // Initialize auth routes
@@ -149,8 +72,8 @@ export const initializeAuth = () => {
       authUrl.searchParams.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
       authUrl.searchParams.append('state', state);
       
-      // Updated scopes to include profile picture access
-      const scopes = 'openid profile email r_basicprofile';
+      // Updated scopes to use OpenID Connect
+      const scopes = 'openid profile email';
       authUrl.searchParams.append('scope', scopes);
       console.log('- Requesting scopes:', scopes);
       
@@ -203,6 +126,14 @@ export const initializeAuth = () => {
         tokenRequestBody.append('client_id', process.env.LINKEDIN_CLIENT_ID);
         tokenRequestBody.append('client_secret', process.env.LINKEDIN_CLIENT_SECRET);
         
+        // Debug logging to verify the request being sent
+        console.log('Token request details:');
+        console.log('- Endpoint: https://www.linkedin.com/oauth/v2/accessToken');
+        console.log('- Redirect URI:', process.env.LINKEDIN_CALLBACK_URL);
+        console.log('- Client ID:', process.env.LINKEDIN_CLIENT_ID ? '[PRESENT]' : '[MISSING]');
+        console.log('- Client Secret:', process.env.LINKEDIN_CLIENT_SECRET ? '[PRESENT]' : '[MISSING]');
+        console.log('- Code:', code ? '[PRESENT]' : '[MISSING]');
+        
         // Make request to LinkedIn token endpoint
         let tokenResponse;
         try {
@@ -219,6 +150,20 @@ export const initializeAuth = () => {
           if (!tokenResponse.ok) {
             const errorData = await tokenResponse.text();
             console.error(`Token exchange failed: ${tokenResponse.status} ${errorData}`);
+            
+            // Additional logging to help diagnose issues
+            if (tokenResponse.status === 401) {
+              console.error('Client authentication failed - please verify:');
+              console.error('1. LinkedIn Client ID is correct');
+              console.error('2. LinkedIn Client Secret is correct (no extra spaces, encoding issues)');
+              console.error('3. Redirect URI exactly matches what is configured in LinkedIn');
+            } else if (tokenResponse.status === 400) {
+              console.error('Bad request - check these common issues:');
+              console.error('1. The authorization code may have expired (they are short-lived)');
+              console.error('2. The code might have been used already (can only be used once)');
+              console.error('3. Redirect URI in token request must match the one used during authorization');
+            }
+            
             return res.redirect(`${process.env.FRONTEND_URL}/login?error=token_exchange_failed&status=${tokenResponse.status}`);
           }
         } catch (error) {
@@ -230,6 +175,13 @@ export const initializeAuth = () => {
         try {
           tokenData = await tokenResponse.json();
           
+          // Debug token response
+          console.log('Token response received:');
+          console.log('- Access token present:', !!tokenData.access_token);
+          console.log('- ID token present:', !!tokenData.id_token);
+          console.log('- Token type:', tokenData.token_type);
+          console.log('- Expires in:', tokenData.expires_in);
+          
           if (!tokenData.access_token) {
             console.error('No access token in response');
             return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_access_token`);
@@ -239,77 +191,141 @@ export const initializeAuth = () => {
           return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_token_response`);
         }
         
-        // Get basic profile information
-        let user = {};
+        // Using OpenID Connect instead of LinkedIn's v2 API
+        // Get the ID token claims from LinkedIn OpenID
+        const idToken = tokenData.id_token;
         
-        // Try to get user info from the userinfo endpoint first
-        try {
-          console.log('Fetching profile from LinkedIn API');
-          const profileResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
-            headers: {
-              'Authorization': `Bearer ${tokenData.access_token}`,
-              'Accept': 'application/json'
-            }
-          });
+        if (!idToken) {
+          console.error('No ID token in response');
+          console.log('Falling back to LinkedIn API for profile information');
           
-          if (profileResponse.ok) {
+          // Fallback to using the LinkedIn API to get profile information
+          try {
+            console.log('Fetching profile from LinkedIn API');
+            const profileResponse = await fetch('https://api.linkedin.com/v2/userinfo', {
+              headers: {
+                'Authorization': `Bearer ${tokenData.access_token}`,
+                'Accept': 'application/json'
+              }
+            });
+            
+            if (!profileResponse.ok) {
+              const errorText = await profileResponse.text();
+              console.error(`Profile API failed: ${profileResponse.status} ${errorText}`);
+              
+              // Try a second fallback to the me endpoint with proper version header
+              console.log('Trying alternative endpoint...');
+              const meResponse = await fetch('https://api.linkedin.com/v2/me', {
+                headers: {
+                  'Authorization': `Bearer ${tokenData.access_token}`,
+                  'Accept': 'application/json',
+                  'LinkedIn-Version': '202305' // Using a specific version header
+                }
+              });
+              
+              if (!meResponse.ok) {
+                const meErrorText = await meResponse.text();
+                console.error(`Me API failed: ${meResponse.status} ${meErrorText}`);
+                return res.redirect(`${process.env.FRONTEND_URL}/login?error=profile_fetch_failed`);
+              }
+              
+              const profileData = await meResponse.json();
+              console.log('Profile data retrieved via API:', JSON.stringify(profileData).substring(0, 100) + '...');
+              
+              // Create user object from API data
+              const user = {
+                id: profileData.id,
+                name: `${profileData.localizedFirstName || ''} ${profileData.localizedLastName || ''}`.trim() || 'LinkedIn User',
+                email: null, // Email might not be available without additional API calls
+                accessToken: tokenData.access_token
+              };
+              
+              // Generate JWT token
+              const token = generateSecureToken(user);
+              
+              // Redirect to frontend with token
+              return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
+            }
+            
             const userInfo = await profileResponse.json();
             console.log('UserInfo data:', JSON.stringify(userInfo).substring(0, 100) + '...');
             
-            user = {
+            // Create user object from userInfo endpoint
+            const user = {
               id: userInfo.sub,
               name: userInfo.name || 'LinkedIn User',
               email: userInfo.email,
               accessToken: tokenData.access_token
             };
-          } else {
-            // Fallback to the me endpoint
-            console.log('UserInfo endpoint failed, trying me endpoint...');
-            const meResponse = await fetch('https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName)', {
-              headers: {
-                'Authorization': `Bearer ${tokenData.access_token}`,
-                'Accept': 'application/json',
-                'LinkedIn-Version': '202305'
-              }
-            });
             
-            if (!meResponse.ok) {
-              throw new Error(`Profile fetch failed: ${meResponse.status}`);
-            }
+            // Generate JWT token
+            const token = generateSecureToken(user);
             
-            const profileData = await meResponse.json();
-            console.log('Profile data retrieved via me endpoint:', JSON.stringify(profileData).substring(0, 100) + '...');
-            
-            // Try to get email separately
-            const email = await fetchLinkedInEmail(tokenData.access_token);
-            
-            user = {
-              id: profileData.id,
-              name: `${profileData.localizedFirstName || ''} ${profileData.localizedLastName || ''}`.trim() || 'LinkedIn User',
-              email: email,
-              accessToken: tokenData.access_token
-            };
+            // Redirect to frontend with token
+            return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
+          } catch (apiError) {
+            console.error('API fallback error:', apiError);
+            return res.redirect(`${process.env.FRONTEND_URL}/login?error=api_fallback_failed`);
           }
-        } catch (apiError) {
-          console.error('Profile fetch error:', apiError);
-          return res.redirect(`${process.env.FRONTEND_URL}/login?error=profile_fetch_failed`);
         }
         
-        // Now fetch the profile picture
-        const profilePictureUrl = await fetchLinkedInProfilePicture(tokenData.access_token);
-        if (profilePictureUrl) {
-          user.profilePicture = profilePictureUrl;
-          console.log('Profile picture added to user data');
-        } else {
-          console.log('No profile picture found or failed to fetch');
+        // If we have an ID token, decode it
+        console.log('ID token received, decoding...');
+        
+        // Decode the ID token to get user information
+        // Note: In production, you should validate the token signature
+        const idTokenParts = idToken.split('.');
+        let decodedToken;
+        
+        try {
+          // Handle potential padding issues with base64 decoding
+          const base64 = idTokenParts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const padding = '='.repeat((4 - base64.length % 4) % 4);
+          const decodedString = Buffer.from(base64 + padding, 'base64').toString();
+          decodedToken = JSON.parse(decodedString);
+          
+          console.log('Decoded token:', JSON.stringify(decodedToken).substring(0, 100) + '...');
+          console.log('Token fields:', Object.keys(decodedToken).join(', '));
+        } catch (error) {
+          console.error('Failed to decode ID token:', error);
+          console.error('Token parts structure:', {
+            header: idTokenParts[0] ? 'present' : 'missing',
+            payload: idTokenParts[1] ? 'present' : 'missing',
+            signature: idTokenParts[2] ? 'present' : 'missing'
+          });
+          return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_id_token`);
         }
         
-        // Ensure we have a user ID
+        // Log complete token contents for debugging
+        console.log('Full decoded token contents:');
+        for (const [key, value] of Object.entries(decodedToken)) {
+          console.log(`- ${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
+        }
+        
+        // Create user object from OpenID claims
+        // LinkedIn ID token structure may vary - we need to be flexible
+        const user = {
+          id: decodedToken.sub || decodedToken.iss_id || '',
+          name: decodedToken.name || 'LinkedIn User',
+          email: decodedToken.email || '',
+          // Store additional fields if available
+          givenName: decodedToken.given_name || decodedToken.firstName || '',
+          familyName: decodedToken.family_name || decodedToken.lastName || '',
+          accessToken: tokenData.access_token
+        };
+        
+        // If user ID is missing or empty, try to get it from alternative sources
         if (!user.id) {
-          if (user.email) {
-            user.id = `email:${user.email}`;
+          // If we couldn't get a user ID from the token, try to extract from other fields
+          console.log('User ID missing from token claims, checking alternative sources');
+          
+          // Check for email-based identity
+          if (decodedToken.email) {
+            user.id = `email:${decodedToken.email}`;
             console.log('Using email as user ID fallback');
-          } else {
+          } 
+          // Last resort - generate a pseudo-unique ID
+          else {
             user.id = `linkedin:${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
             console.log('Generated fallback ID');
           }
@@ -317,11 +333,10 @@ export const initializeAuth = () => {
         
         console.log('Final user object:', JSON.stringify({
           ...user,
-          accessToken: user.accessToken ? '[PRESENT]' : '[MISSING]',
-          profilePicture: user.profilePicture ? user.profilePicture.substring(0, 50) + '...' : '[NONE]'
+          accessToken: user.accessToken ? '[PRESENT]' : '[MISSING]'
         }));
         
-        // Generate JWT token (now includes profile picture)
+        // Generate JWT token
         try {
           const token = generateSecureToken(user);
           console.log('JWT token generated successfully');
@@ -331,6 +346,10 @@ export const initializeAuth = () => {
           const redirectUrl = `${process.env.FRONTEND_URL}/auth/success?token=${encodedToken}`;
           console.log('Redirecting to:', redirectUrl);
           
+          // For debugging purposes, log the token length
+          console.log('Token length:', token.length);
+          
+          // Use a simple 302 redirect which works best across browsers
           return res.status(302).redirect(redirectUrl);
         } catch (jwtError) {
           console.error('Error generating JWT:', jwtError);
