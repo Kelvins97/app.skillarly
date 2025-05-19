@@ -356,32 +356,39 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   }
 
   try {
-    // Ensure user exists — upsert first (minimal insert)
+    // 1. Ensure user exists (safe upsert)
     await supabase.from('users').upsert([{ email }], { onConflict: 'email' });
 
-    // Fetch user (null-safe)
-    const { data: user, error: fetchError } = await supabase
+    // 2. Fetch user safely (no `.single()`!)
+    const { data: users, error: fetchError } = await supabase
       .from('users')
       .select('*')
       .eq('email', email)
-      .maybeSingle();
+      .limit(1);
 
-    if (fetchError) {
-      throw new Error(`User fetch error: ${fetchError.message}`);
+    const user = users?.[0] || null;
+
+    if (!user) {
+      console.error('No user found after upsert:', fetchError);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found after upsert'
+      });
     }
 
-    const plan = user?.plan || 'basic';
-    const allowedScrapes = { basic: 2, pro: 10, premium: 100 }[plan];
+    const plan = user.plan || 'basic';
+    const limits = { basic: 2, pro: 10, premium: 100 };
+    const allowed = limits[plan];
 
-    if ((user?.monthly_scrapes || 0) >= allowedScrapes) {
+    if ((user?.monthly_scrapes || 0) >= allowed) {
       return res.status(403).json({ error: 'limit_reached' });
     }
 
-    // Scrape data from LinkedIn
+    // 3. Scrape LinkedIn profile
     const parsed = await scraper(profileUrl);
     console.log('Parsed data:', parsed);
 
-    // Save scraped data
+    // 4. Upsert scraped data
     await supabase.from('users').upsert([{
       email,
       name: parsed.name,
@@ -391,7 +398,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
       certifications: parsed.certifications,
       companies: parsed.companies,
       education: parsed.education,
-      profilepicture: parsed.profilePicture || parsed.profilepicture || null, // double-safe
+      profilepicture: parsed.profilePicture || parsed.profilepicture || null,
       connections: parsed.connections ? parseInt(parsed.connections) : null,
       monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
       last_scrape: new Date().toISOString(),
@@ -399,17 +406,17 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
       subscribed: true
     }], { onConflict: 'email' });
 
-  if (user?.id) {
-  await supabase.from('scrape_logs').insert([{ user_id: user.id }]);
-  } else {
-  console.warn(`Could not log scrape — user ID not available for ${email}`);
-  }
+    // 5. Log scrape event
+    if (user?.id) {
+      await supabase.from('scrape_logs').insert([{ user_id: user.id }]);
+    } else {
+      console.warn(`No user ID found to log scrape for email: ${email}`);
+    }
 
-
-    // Optional: send email notification
+    // 6. Optional: send email
     await sendEmail(email, parsed.name, parsed.skills);
 
-    // Respond with parsed data
+    // 7. Return the response
     res.json({
       success: true,
       email,
@@ -435,6 +442,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     });
   }
 });
+
 
 
 // Rate limiter setup
