@@ -365,6 +365,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     }
 
   const parsed = await scraper(profileUrl);
+  console.log('Parsed data:', parsed);
   await supabase.from('users').upsert([{
   email,
   name: parsed.name,
