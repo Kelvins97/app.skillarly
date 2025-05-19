@@ -209,7 +209,7 @@ export default async function scrapeLinkedInProfile(profileUrl) {
     await browser.close();
     throw new Error(`Scraping failed: ${error.message}`);
   }
-}
+} // <- This closing brace was missing!
 
 // Helper function to scroll page and load lazy content
 async function autoScroll(page) {
