@@ -14,9 +14,6 @@ const generateSecureToken = (user) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      picture: user.picture, // Add profile picture to JWT
-      given_name: user.given_name,
-      family_name: user.family_name,
       exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24) // 24 hours
     },
     process.env.JWT_SECRET,
@@ -240,9 +237,6 @@ export const initializeAuth = () => {
                 id: profileData.id,
                 name: `${profileData.localizedFirstName || ''} ${profileData.localizedLastName || ''}`.trim() || 'LinkedIn User',
                 email: null, // Email might not be available without additional API calls
-                given_name: profileData.localizedFirstName || '',
-                family_name: profileData.localizedLastName || '',
-                picture: profileData.profilePicture || null, // Try to get profile picture if available
                 accessToken: tokenData.access_token
               };
               
@@ -261,9 +255,6 @@ export const initializeAuth = () => {
               id: userInfo.sub,
               name: userInfo.name || 'LinkedIn User',
               email: userInfo.email,
-              given_name: userInfo.given_name || '',
-              family_name: userInfo.family_name || '',
-              picture: userInfo.picture || null, // Include profile picture from userinfo
               accessToken: tokenData.access_token
             };
             
@@ -318,9 +309,8 @@ export const initializeAuth = () => {
           name: decodedToken.name || 'LinkedIn User',
           email: decodedToken.email || '',
           // Store additional fields if available
-          given_name: decodedToken.given_name || decodedToken.firstName || '',
-          family_name: decodedToken.family_name || decodedToken.lastName || '',
-          picture: decodedToken.picture || null, // Include profile picture from ID token
+          givenName: decodedToken.given_name || decodedToken.firstName || '',
+          familyName: decodedToken.family_name || decodedToken.lastName || '',
           accessToken: tokenData.access_token
         };
         
