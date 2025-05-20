@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import stripePackage from 'stripe';
 import supabase from './supabase.js';
+import { adminSupabase } from './supabase.js';
 import scraper from './scraper.js';
 import { sendEmail } from './email.js';
 import OpenAI from 'openai';
