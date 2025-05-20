@@ -183,6 +183,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+//Test adminSupabase
+app.get('/debug-users', async (req, res) => {
+  const { data, error } = await adminSupabase.from('users').select('*').limit(5);
+
+  if (error) {
+    console.error('❌ adminSupabase select failed:', error.message);
+    return res.status(500).json({ error: 'admin_select_failed', message: error.message });
+  }
+
+  res.json({ users: data });
+});
+
 // Test route to debug Supabase user creation
 app.post('/test-supabase', verifyAuthToken, async (req, res) => {
   try {
@@ -535,6 +547,11 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
             returning: 'representation'
           })
           .select('*');
+
+        const { data, error } = await adminSupabase.from('users').select('id, email').eq('email', email);
+
+         console.log('🎯 Confirmed user after upsert:', data);
+
         
         if (upsertError) {
           console.error(`❌ Upsert error on attempt ${retries + 1}:`, upsertError);
