@@ -192,7 +192,7 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
     
     // 1. Test Supabase connection
     console.log('Step 1: Testing Supabase connection');
-    const { data: healthData, error: healthError } = await supabase.from('health_check').select('*');
+    const { data: healthData, error: healthError } = await adminSupabase.from('health_check').select('*');
     
     if (healthError) {
       console.error('❌ Supabase connection error:', healthError);
@@ -207,7 +207,7 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
     
     // 2. Check if user exists
     console.log('Step 2: Checking if user exists');
-    const { data: existingUsers, error: findError } = await supabase
+    const { data: existingUsers, error: findError } = await adminSupabase
       .from('users')
       .select('*')
       .eq('email', email);
@@ -238,7 +238,7 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
     
     // 4. Now try the standard upsert
     console.log('Step 4: Upserting user with standard method');
-    const { data: upsertResult, error: upsertError } = await supabase
+    const { data: upsertResult, error: upsertError } = await adminSupabase
       .from('users')
       .upsert([{ email: email }], { 
         onConflict: 'email',
@@ -422,7 +422,7 @@ app.post('/update-preferences', verifyAuthToken, async (req, res) => {
     const email = req.user.email;
 
     // Update in Supabase
-    const { error } = await supabase
+    const { error } = await adminSupabase
       .from('users')
       .update({ 
         email_notifications,
@@ -448,7 +448,7 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
   const email = req.user.email;
 
   try {
-    const { error } = await supabase
+    const { error } = await adminSupabase
       .from('users')
       .upsert([{
         email,
@@ -503,7 +503,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     
     // Try the RLS bypass function first
     try {
-      const { data: sqlResult, error: sqlError } = await supabase.rpc(
+      const { data: sqlResult, error: sqlError } = await adminSupabase.rpc(
         'create_user_bypass_rls',
         { user_email: email }
       );
@@ -528,7 +528,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
       
       // Try standard upsert if SQL bypass didn't work
       if (!userId) {
-        const { data: upsertResult, error: upsertError } = await supabase
+        const { data: upsertResult, error: upsertError } = await adminSupabase
           .from('users')
           .upsert([{ email }], { 
             onConflict: 'email',
@@ -637,7 +637,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
 
     // 6. Update user with scraped data
     console.log('💾 Updating user with scraped data');
-    const { error: updateError } = await supabase
+    const { error: updateError } = await adminSupabase
       .from('users')
       .update({
         name: parsed.name,
