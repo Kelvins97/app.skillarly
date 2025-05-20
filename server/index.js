@@ -182,6 +182,128 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Test route to debug Supabase user creation
+app.post('/test-supabase', verifyAuthToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+    
+    console.log('🔍 Testing Supabase connection for email:', email);
+    
+    // 1. Test Supabase connection
+    console.log('Step 1: Testing Supabase connection');
+    const { data: healthData, error: healthError } = await supabase.from('health_check').select('*');
+    
+    if (healthError) {
+      console.error('❌ Supabase connection error:', healthError);
+      return res.status(500).json({ 
+        success: false, 
+        error: 'supabase_connection_error',
+        message: healthError.message 
+      });
+    }
+    
+    console.log('✅ Supabase connection successful');
+    
+    // 2. Check if user exists
+    console.log('Step 2: Checking if user exists');
+    const { data: existingUsers, error: findError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email);
+      
+    if (findError) {
+      console.error('❌ Error checking for existing user:', findError);
+      return res.status(500).json({ 
+        success: false, 
+        error: 'user_check_error',
+        message: findError.message 
+      });
+    }
+    
+    console.log('Existing users found:', existingUsers ? existingUsers.length : 0);
+    
+    // 3. Create user with raw SQL (bypass potential RLS issues)
+    console.log('Step 3: Creating user with raw SQL');
+    const { data: sqlResult, error: sqlError } = await supabase.rpc(
+      'create_user_bypass_rls',
+      { user_email: email }
+    );
+    
+    if (sqlError) {
+      console.error('❌ SQL user creation error:', sqlError);
+    } else {
+      console.log('✅ SQL user creation result:', sqlResult);
+    }
+    
+    // 4. Now try the standard upsert
+    console.log('Step 4: Upserting user with standard method');
+    const { data: upsertResult, error: upsertError } = await supabase
+      .from('users')
+      .upsert([{ email: email }], { 
+        onConflict: 'email',
+        returning: 'representation' 
+      })
+      .select('*');
+      
+    if (upsertError) {
+      console.error('❌ Standard user upsert error:', upsertError);
+    } else {
+      console.log('✅ Standard user upsert result:', upsertResult);
+    }
+    
+    // 5. Auth API direct check (if using auth)
+    console.log('Step 5: Checking Supabase auth');
+    let authUser = null;
+    let authError = null;
+    
+    try {
+      const { data, error } = await supabase.auth.admin.getUserByEmail(email);
+      authUser = data;
+      authError = error;
+    } catch (e) {
+      console.log('Auth admin API not available or error:', e);
+    }
+    
+    // Return all test results
+    return res.json({
+      success: true,
+      email: email,
+      connection: { success: !healthError },
+      existing_user: {
+        found: existingUsers && existingUsers.length > 0,
+        count: existingUsers ? existingUsers.length : 0,
+        data: existingUsers?.[0] ? { id: existingUsers[0].id, email: existingUsers[0].email } : null
+      },
+      sql_creation: {
+        success: !sqlError,
+        error: sqlError ? sqlError.message : null,
+        result: sqlResult
+      },
+      upsert: {
+        success: !upsertError,
+        error: upsertError ? upsertError.message : null,
+        result: upsertResult ? { 
+          count: upsertResult.length,
+          first: upsertResult[0] ? { id: upsertResult[0].id, email: upsertResult[0].email } : null 
+        } : null
+      },
+      auth: {
+        success: !authError,
+        error: authError ? authError.message : null,
+        user: authUser ? { id: authUser.id, email: authUser.email } : null
+      }
+    });
+  } catch (error) {
+    console.error('❌ Test route error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'test_failed',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
 // Protected Routes (using JWT token)
 //user-info
 app.get('/user-info', verifyAuthToken, async (req, res) => {
