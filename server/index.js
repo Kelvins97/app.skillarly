@@ -207,6 +207,10 @@ app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
   });
 });
 
+//Dev-seed - manual inputs
+import devSeedRoute from './dev-seed.js';
+app.use(devSeedRoute);
+
 //Test adminSupabase
 app.get('/debug-users', async (req, res) => {
   const { data, error } = await adminSupabase.from('users').select('*').limit(5);
