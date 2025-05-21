@@ -20,6 +20,7 @@ import { createClient } from 'redis';
 import jwt from 'jsonwebtoken';
 import { verifyAuthToken } from './authMiddleware.js';
 import authRoutes from './authRoutes.js';
+import devSeedRoute from './dev-seed.js';
 
 // 1. Environment Configuration
 dotenv.config();
@@ -208,7 +209,6 @@ app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
 });
 
 //Dev-seed - manual inputs
-import devSeedRoute from './dev-seed.js';
 app.use(devSeedRoute);
 
 //Test adminSupabase
