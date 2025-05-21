@@ -489,41 +489,133 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
   }
 });
 
+// Rate limiting middleware
+app.use('/update-preferences', rateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50 // Limit each IP to 50 requests per window
+}));
+
+// Request validation middleware
+const validatePreferences = (req, res, next) => {
+  const schema = Joi.object({
+    email_notifications: Joi.boolean().required(),
+    frequency: Joi.string().valid('daily', 'weekly', 'monthly')
+  });
+  // ... validation logic ...
+};
+
+//app.post('/update-preferences', validatePreferences, ...);
 
 // Update Preferences - protected with JWT auth
 app.post('/update-preferences', verifyAuthToken, async (req, res) => {
+  const { email_notifications, frequency = 'weekly' } = req.body;
+  const email = req.user?.email;
+
+  // Log entry point with request context
+  console.log(`Preferences update initiated for ${email}`, {
+    endpoint: '/update-preferences',
+    notification_change: typeof email_notifications,
+    frequency_requested: frequency
+  });
+
+  if (!email) {
+    console.error('Unauthorized preferences update attempt - Missing email in JWT');
+    return res.status(401).json({ 
+      error: "Unauthorized",
+      userMessage: "Authentication required to update preferences"
+    });
+  }
+
+  // Validate input parameters
+  const validFrequencies = new Set(['daily', 'weekly', 'monthly']);
+  if (typeof email_notifications !== 'boolean' || !validFrequencies.has(frequency)) {
+    console.error(`Invalid preferences input for ${email}`, {
+      received: { email_notifications, frequency }
+    });
+    return res.status(400).json({
+      error: "Invalid input",
+      userMessage: "Please provide valid notification preferences"
+    });
+  }
+
   try {
-    const { email_notifications, frequency = 'weekly' } = req.body;
-    const email = req.user.email;
-
-    // Update in Supabase
-    const { error } = await adminSupabase
+    const { data, error: updateError } = await adminSupabase
       .from('users')
-      .update({ 
+      .update({
         email_notifications,
-        notification_frequency: frequency
+        notification_frequency: frequency,
+        preferences_updated_at: new Date().toISOString()
       })
-      .eq('email', email);
+      .eq('email', email)
+      .select('email'); // Verify update success
 
-    if (error) {
-      console.error('Supabase update error:', error);
-      return res.status(500).json({ success: false, error: 'Update failed' });
+    if (updateError) {
+      console.error(`Supabase update error for ${email}:`, {
+        code: updateError.code,
+        details: updateError.details,
+        hint: updateError.hint
+      });
+      return res.status(500).json({
+        error: "Database update failed",
+        userMessage: "Failed to save preferences. Please try again."
+      });
     }
 
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error updating preferences:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    if (!data || data.length === 0) {
+      console.error(`User not found during preferences update: ${email}`);
+      return res.status(404).json({
+        error: "User not found",
+        userMessage: "Account not found. Please contact support."
+      });
+    }
+
+    // Audit log for successful update
+    console.log(`Preferences updated successfully for ${email}`, {
+      new_settings: { email_notifications, frequency }
+    });
+
+    return res.json({
+      success: true,
+      message: "Notification preferences updated",
+      updatedAt: new Date().toISOString()
+    });
+
+  } catch (err) {
+    console.error(`Critical error updating preferences for ${email}:`, {
+      error: err.stack || err,
+      body: { ...req.body, email_notifications: typeof email_notifications } // Sanitized
+    });
+    
+    return res.status(500).json({
+      error: "Internal server error",
+      userMessage: "Failed to update preferences due to a system error."
+    });
   }
 });
 
 // Subscribe or re-subscribe user - protected with JWT auth
 app.post('/subscribe', verifyAuthToken, async (req, res) => {
   const { name, headline, skills, certifications } = req.body;
-  const email = req.user.email;
+  const email = req.user?.email;
+
+  // Log entry point with basic request info
+  console.log(`Subscription attempt started for email: ${email}`, {
+    endpoint: '/subscribe',
+    user: email
+  });
+
+  if (!email) {
+    console.error('Authorization failed - No email in JWT');
+    return res.status(401).json({ error: "Unauthorized - Invalid credentials" });
+  }
 
   try {
-    const { error } = await adminSupabase
+    // Log subscription payload (sanitized)
+    console.log(`Processing subscription update for ${email}`, {
+      fields: { name: !!name, headline: !!headline, skills: skills?.length, certifications: certifications?.length }
+    });
+
+    const { data, error: upsertError } = await adminSupabase
       .from('users')
       .upsert([{
         email,
@@ -531,18 +623,44 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
         headline,
         skills,
         certifications,
-        subscribed: true
-      }], { onConflict: 'email' });
+        subscribed: true,
+        last_subscribed: new Date().toISOString()
+      }], { 
+        onConflict: 'email',
+        returning: 'minimal' // Remove if you need the returned data
+      });
 
-    if (error) {
-      console.error("Supabase insert error:", error.message);
-      return res.status(500).json({ error: "Failed to subscribe user" });
+    if (upsertError) {
+      console.error(`Supabase upsert error for ${email}:`, {
+        code: upsertError.code,
+        message: upsertError.message,
+        details: upsertError.details
+      });
+      return res.status(500).json({ 
+        error: "Failed to update subscription",
+        userMessage: "We encountered an error processing your subscription. Please try again later."
+      });
     }
 
-    res.json({ success: true, message: "User subscribed" });
+    // Log successful subscription
+    console.log(`Subscription updated successfully for ${email}`);
+    
+    return res.json({ 
+      success: true,
+      message: "Subscription updated successfully",
+      updated: true
+    });
+
   } catch (err) {
-    console.error('Subscribe error:', err);
-    res.status(500).json({ error: "Server error" });
+    console.error(`Critical error during subscription for ${email}:`, {
+      error: err.stack || err,
+      body: req.body // Caution: Only log non-sensitive data
+    });
+    
+    return res.status(500).json({
+      error: "Internal server error",
+      userMessage: "A system error occurred. Our team has been notified."
+    });
   }
 });
 
@@ -706,35 +824,40 @@ app.post('/recommendations', recommendationsLimiter, verifyAuthToken, async (req
   try {
     const email = req.user.email;
 
-    // Get user data
-    const { data: user, error: userError } = await supabase
+    // 1. Fetch user with admin privileges
+    const { data: users, error: userError } = await adminSupabase
       .from('users')
-      .select('skills, name, plan, email_notifications, monthly_scrapes')
+      .select('id, skills, name, plan, email_notifications, monthly_scrapes')
       .eq('email', email)
       .limit(1);
 
-    if (userError) {
+    const user = users?.[0];
+
+    if (userError || !user) {
+      console.warn('❌ User not found or fetch error:', userError?.message);
       return res.status(404).json({ error: 'User not found' });
     }
 
     const plan = user.plan || 'basic';
-    const limits = { basic: 2, pro: 10, premium: Infinity };
     const usage = user.monthly_scrapes || 0;
+    const limits = { basic: 2, pro: 10, premium: Infinity };
+    const allowed = limits[plan];
 
-    if (usage >= limits[plan]) {
+    if (usage >= allowed) {
       return res.status(403).json({ error: 'Monthly scrape limit reached' });
     }
 
-    // Update scrape count
-    await supabase
+    // 2. Update scrape count
+    await adminSupabase
       .from('users')
       .update({ monthly_scrapes: usage + 1 })
-      .eq('email', email);
+      .eq('id', user.id);
 
     const skills = user.skills || [];
     const name = user.name || 'Professional';
     const wantsEmail = user.email_notifications !== false;
 
+    // 3. Generate OpenAI-based recommendations
     const prompt = `I have these skills: ${skills.join(', ')}. Recommend 3 online courses and 2 certifications. Format as JSON: { courses: [], certifications: [] }.`;
 
     const response = await openai.chat.completions.create({
@@ -745,123 +868,166 @@ app.post('/recommendations', recommendationsLimiter, verifyAuthToken, async (req
     const text = response.choices[0].message.content;
     let json;
     try {
-      const match = text.match(/```json\n?([\\s\\S]+?)```/);
+      const match = text.match(/```json\n?([\s\S]+?)```/);
       json = match ? JSON.parse(match[1]) : JSON.parse(text);
     } catch (parseError) {
-      // Fallback if JSON parsing fails
+      console.warn('⚠️ Failed to parse AI JSON:', parseError.message);
       json = { courses: [], certifications: [] };
     }
 
     const { courses = [], certifications = [] } = json;
 
-    // Fetch live jobs
+    // 4. Fetch live job recommendations
     let jobs = [];
     try {
-      const jobsRes = await axios.post(`${process.env.BACKEND_URL || 'http://localhost:3000'}/jobs/remotive`, 
-        { skills }, 
+      const jobsRes = await axios.post(
+        `${process.env.BACKEND_URL || 'http://localhost:3000'}/jobs/remotive`,
+        { skills },
         { headers: { Authorization: req.headers.authorization } }
       );
       jobs = jobsRes.data.jobs || [];
     } catch (jobError) {
-      console.error('Jobs fetch error:', jobError.message);
+      console.warn('⚠️ Jobs fetch error:', jobError.message);
     }
 
-    // Send via email if opted in
+    // 5. Optional email summary
     if (wantsEmail) {
       try {
         await sendEmail(email, name, {
           primarySkill: skills[0] || 'Your Skills',
-          email: email,
+          email,
           courses,
           certifications,
           jobs
         });
       } catch (emailError) {
-        console.error('Email send error:', emailError.message);
+        console.warn('⚠️ Email send error:', emailError.message);
       }
     }
 
     res.json({ success: true, courses, certifications, jobs, emailSent: wantsEmail });
   } catch (err) {
-    console.error('Recommendation error:', err.message);
+    console.error('❌ Recommendation error:', err.message);
     res.status(500).json({ error: 'recommendation_failed' });
   }
 });
 
-// Subscription Endpoint - protected with auth
+
 app.post('/subscription', verifyAuthToken, async (req, res) => {
-  const { plan, paymentMethod } = req.body;
+  const { plan, paymentMethod, phone } = req.body;
   const email = req.user.email;
 
   if (!plan) {
     return res.status(400).json({ error: 'Missing plan' });
   }
 
-  // Update user plan in Supabase
-  await supabase.from('users').update({ plan, subscribed: true }).eq('email', email);
+  console.log(`🛒 Subscription request: ${email} → ${plan} via ${paymentMethod || 'unspecified'}`);
 
-  if (plan === 'basic') {
-    return res.json({ success: true });
+  try {
+    // 1. Fetch user ID (required for subscriptions table)
+    const { data: users, error: fetchError } = await adminSupabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .limit(1);
+
+    const user = users?.[0];
+
+    if (fetchError || !user) {
+      console.error('❌ Failed to fetch user:', fetchError?.message || 'User not found');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = user.id;
+
+    // 2. Update user record with new plan and flag
+    const { error: updateError } = await adminSupabase
+      .from('users')
+      .update({ plan, subscribed: plan !== 'basic' })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('❌ Failed to update user plan:', updateError.message);
+      return res.status(500).json({ error: 'Failed to update plan' });
+    }
+
+    // 3. Handle FREE plan immediately
+    if (plan === 'basic') {
+      return res.json({ success: true });
+    }
+
+    // 4. STRIPE Subscription
+    if (paymentMethod === 'stripe') {
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{
+          price_data: {
+            currency: 'usd',
+            product_data: { name: `Skillarly ${plan}` },
+            unit_amount: plan === 'pro' ? 500 : 1500,
+          },
+          quantity: 1,
+        }],
+        mode: 'subscription',
+        customer_email: email,
+        success_url: `${process.env.FRONTEND_URL}/success`,
+        cancel_url: `${process.env.FRONTEND_URL}/cancel`,
+      });
+
+      return res.json({ stripeUrl: session.url });
+    }
+
+    // 5. M-PESA Subscription
+    if (paymentMethod === 'mpesa') {
+      const mpesaResult = await sendMpesaPush({
+        amount: plan === 'pro' ? 500 : 1500,
+        phone: phone || '2547XXXXXXXX',
+        email
+      });
+
+      return res.json({ mpesaStatus: 'initiated', response: mpesaResult });
+    }
+
+    return res.status(400).json({ error: 'Invalid payment method' });
+
+  } catch (err) {
+    console.error('💥 Subscription processing error:', err.message);
+    return res.status(500).json({ error: 'subscription_failed', message: err.message });
   }
-
-  if (paymentMethod === 'stripe') {
-    // Create Stripe Checkout Session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [{
-        price_data: {
-          currency: 'usd',
-          product_data: { name: `Skillarly ${plan}` },
-          unit_amount: plan === 'pro' ? 500 : 1500,
-        },
-        quantity: 1,
-      }],
-      mode: 'subscription',
-      customer_email: email,
-      success_url: `${process.env.FRONTEND_URL}/success`,
-      cancel_url: `${process.env.FRONTEND_URL}/cancel`,
-    });
-
-    return res.json({ stripeUrl: session.url });
-  }
-
-  if (paymentMethod === 'mpesa') {
-    // Handle M-Pesa payment
-    const mpesaResult = await sendMpesaPush({
-      amount: plan === 'pro' ? 500 : 1500,
-      phone: req.body.phone || '2547XXXXXXXX',
-      email
-    });
-
-    return res.json({ mpesaStatus: 'initiated', response: mpesaResult });
-  }
-
-  res.status(400).json({ error: 'Invalid payment method' });
 });
 
 // Log Scrape - protected with auth
 app.post('/scrape-log', verifyAuthToken, async (req, res) => {
   try {
     const email = req.user.email;
-    
-    // Get user ID
-    const { data: user } = await supabase
+    console.log(`📝 Logging scrape for: ${email}`);
+
+    // Get user ID securely with adminSupabase
+    const { data: users, error: userError } = await adminSupabase
       .from('users')
       .select('id')
       .eq('email', email)
       .limit(1);
 
-    if (!user) {
+    const user = users?.[0];
+
+    if (userError || !user) {
+      console.error('❌ User fetch error:', userError?.message || 'User not found');
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Log scrape in the database (assuming table `scrape_logs(user_id)` exists)
     await pool.query(`INSERT INTO scrape_logs (user_id) VALUES ($1)`, [user.id]);
+
+    console.log('✅ Scrape log entry created');
     res.json({ success: true });
+
   } catch (error) {
-    console.error('Scrape log error:', error);
-    res.status(500).json({ error: 'Failed to log scrape' });
+    console.error('🔥 Scrape log error:', error.message);
+    res.status(500).json({ error: 'Failed to log scrape', message: error.message });
   }
 });
+
 
 // Send Email - protected with auth
 app.post('/send-email', verifyAuthToken, async (req, res) => {
@@ -876,21 +1042,34 @@ app.post('/mpesa/callback', (req, res) => {
   res.sendStatus(200);
 });
 
-// Reset monthly scrapes (for CRON jobs)
+// Reset monthly scrapes (for CRON jobs or admin dashboard)
 app.post('/reset-scrapes', async (req, res) => {
   const adminKey = req.headers['x-admin-key'];
+
   if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+    console.warn('❌ Unauthorized reset attempt');
     return res.status(401).json({ error: 'unauthorized' });
   }
-  
+
   try {
-    await supabase.from('users').update({ monthly_scrapes: 0 });
-    res.json({ success: true });
+    const { error } = await adminSupabase
+      .from('users')
+      .update({ monthly_scrapes: 0 });
+
+    if (error) {
+      console.error('❌ Supabase update error:', error.message);
+      return res.status(500).json({ error: 'reset_failed', message: error.message });
+    }
+
+    console.log('✅ Monthly scrapes reset successfully');
+    res.json({ success: true, message: 'Monthly scrapes reset' });
+
   } catch (e) {
-    console.error('Reset scrapes error:', e);
-    res.status(500).json({ error: 'reset_failed' });
+    console.error('🔥 Unexpected reset error:', e.message);
+    res.status(500).json({ error: 'reset_failed', message: e.message });
   }
 });
+
 
 // Job APIs - protected with auth
 app.post('/jobs/remotive', verifyAuthToken, async (req, res) => {
