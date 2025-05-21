@@ -383,26 +383,31 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 
     console.log('✅ Supabase user:', userData);
 
-    // Get subscription plan
-    const planResult = await pool.query(`
-      SELECT plan FROM subscriptions 
-      WHERE user_email = $1 AND is_active = TRUE
-    `, [email]);
+// Get subscription plan
+let plan = userData.plan || 'basic';
+let monthly_scrapes = 0;
 
-    const plan = planResult.rows[0]?.plan || userData.plan || 'basic';
-    console.log('📦 User plan:', plan);
-
-    // Monthly scrapes count
-    const scrapeResult = await pool.query(`
-      SELECT COUNT(*) as count 
-      FROM scrape_logs sl
-      JOIN users u ON u.id = sl.user_id
-      WHERE u.email = $1 
-      AND DATE_TRUNC('month', sl.scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
-    `, [email]);
-
-    const monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
-    console.log('📊 Monthly scrapes:', monthly_scrapes);
+try {
+  const planResult = await pool.query(`
+    SELECT plan FROM subscriptions WHERE user_email = $1 AND is_active = TRUE
+  `, [email]);
+  plan = planResult.rows[0]?.plan || plan;
+} catch (err) {
+  console.error('🔥 Error fetching subscription plan:', err.message);
+}
+// Monthly scrapes count
+try {
+  const scrapeResult = await pool.query(`
+    SELECT COUNT(*) as count FROM scrape_logs sl
+    JOIN users u ON u.id = sl.user_id
+    WHERE u.email = $1 
+    AND DATE_TRUNC('month', sl.scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
+  `, [email]);
+  monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
+} catch (err) {
+  console.error('🔥 Error counting scrapes:', err.message);
+}
+console.log('📊 Monthly scrapes:', monthly_scrapes);
 
     res.json({
       success: true,
