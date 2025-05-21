@@ -41,5 +41,6 @@ router.post('/dev-seed', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+console.log("✅ dev-seed route loaded");
 
 export default router;
