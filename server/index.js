@@ -489,7 +489,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
   }
 });
 
-// Rate limiting middleware
+/* Rate limiting middleware
 app.use('/update-preferences', rateLimiter({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50 // Limit each IP to 50 requests per window
@@ -504,7 +504,7 @@ const validatePreferences = (req, res, next) => {
   // ... validation logic ...
 };
 
-//app.post('/update-preferences', validatePreferences, ...);
+//app.post('/update-preferences', validatePreferences, ...);*/
 
 // Update Preferences - protected with JWT auth
 app.post('/update-preferences', verifyAuthToken, async (req, res) => {
