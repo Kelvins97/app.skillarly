@@ -393,6 +393,14 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
     let plan = userData.plan || 'basic';
     let monthly_scrapes = 0;
 
+  try {
+  const test = await pool.query('SELECT NOW()');
+  console.log('✅ Postgres pool test succeeded:', test.rows[0]);
+  } catch (err) {
+  console.error('❌ Postgres pool test failed:', err);
+  }
+
+    
     // 1. Check active subscription (based on user_id now!)
     try {
       const planResult = await pool.query(`
