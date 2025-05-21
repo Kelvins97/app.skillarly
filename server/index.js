@@ -209,7 +209,7 @@ app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
 });
 
 //Dev-seed - manual inputs
-app.use(devSeedRoute);
+app.use('/', devSeedRoute);
 
 //Test adminSupabase
 app.get('/debug-users', async (req, res) => {
@@ -1107,5 +1107,13 @@ app.on('redis-connected', () => {
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_URL}`);
+  });
+});
+
+//404 errors
+app.use('*', (req, res) => {
+  res.status(404).json({ 
+    error: 'Not found',
+    message: `Route ${req.originalUrl} not found`
   });
 });
