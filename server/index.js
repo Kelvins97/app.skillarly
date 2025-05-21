@@ -346,7 +346,7 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
 });
 
 // Protected Routes (using JWT token)
-//user-info
+// user-info using adminSupabase only
 app.get('/user-info', verifyAuthToken, async (req, res) => {
   console.log('➡️  [GET] /user-info hit');
 
@@ -360,10 +360,10 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 
     console.log('🔍 Looking up user:', email);
 
-    // Fetch user from Supabase
-    const { data: users, error: fetchError } = await supabase
+    // Fetch user from adminSupabase
+    const { data: users, error: fetchError } = await adminSupabase
       .from('users')
-      .select('id, email, name, email_notifications, plan, profilepicture')
+      .select('id, email, name, email_notifications, plan, profilepicture, monthly_scrapes')
       .eq('email', email)
       .limit(1);
 
@@ -389,49 +389,12 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       plan: userData.plan
     });
 
-    const userId = userData.id;
-    let plan = userData.plan || 'basic';
-    let monthly_scrapes = 0;
-
-  try {
-  const test = await pool.query('SELECT NOW()');
-  console.log('✅ Postgres pool test succeeded:', test.rows[0]);
-  } catch (err) {
-  console.error('❌ Postgres pool test failed:', err);
-  }
-
-    
-    // 1. Check active subscription (based on user_id now!)
-    try {
-      const planResult = await pool.query(`
-        SELECT plan FROM subscriptions 
-        WHERE user_id = $1 AND is_active = TRUE
-        ORDER BY started_at DESC
-        LIMIT 1
-      `, [userId]);
-
-      plan = planResult.rows[0]?.plan || plan;
-    } catch (err) {
-      console.error('🔥 Error fetching subscription plan:', err);
-    }
-
-    // 2. Count scrapes this month
-    try {
-      const scrapeResult = await pool.query(`
-        SELECT COUNT(*) AS count 
-        FROM scrape_logs 
-        WHERE user_id = $1 
-          AND DATE_TRUNC('month', scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
-      `, [userId]);
-
-      monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
-    } catch (err) {
-      console.error('🔥 Error counting scrapes:', err);
-    }
+    const plan = userData.plan || 'basic';
+    const monthly_scrapes = userData.monthly_scrapes || 0;
 
     console.log('📊 Monthly scrapes:', monthly_scrapes);
 
-    // 3. Send response
+    // Send response
     res.json({
       success: true,
       id: userData.id,
