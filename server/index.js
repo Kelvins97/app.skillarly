@@ -546,7 +546,7 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
   }
 });
 
-// Scrape Profile - protected with JWT auth
+//Scrape profile
 app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
   const { profileUrl } = req.body;
   const email = req.user.email;
@@ -558,217 +558,108 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     });
   }
 
+  console.log('📋 Starting scrape for:', email);
+
   try {
-    // 1. Validate email
-    console.log('📋 SCRAPE START for email:', email);
-
-    if (!email || typeof email !== 'string' || email.trim() === '') {
-      console.error('🚨 Invalid or missing email:', email);
-      return res.status(400).json({
-        success: false,
-        message: 'Missing or invalid email from auth token'
-      });
-    }
-
-    console.log('📧 Ensuring user exists for email:', email);
-
-    // 2. First try the RLS bypass function
     let user = null;
     let userId = null;
-    
-    // Try the RLS bypass function first
+
+    // 1. Try bypass RLS function
     try {
-      const { data: sqlResult, error: sqlError } = await adminSupabase.rpc(
-        'create_user_bypass_rls',
-        { user_email: email }
-      );
-      
-      if (sqlError) {
-        console.warn('⚠️ SQL bypass function failed:', sqlError.message);
-        console.log('Falling back to standard upsert...');
-      } else {
-        console.log('✅ SQL bypass successful:', sqlResult);
-        userId = sqlResult.user_id;
-      }
-    } catch (bypassError) {
-      console.warn('⚠️ RLS bypass function not available:', bypassError.message);
+      const { data: sqlResult, error } = await adminSupabase.rpc('create_user_bypass_rls', {
+        user_email: email
+      });
+      if (error) throw error;
+      console.log('✅ RLS bypass success:', sqlResult);
+      userId = sqlResult.user_id;
+    } catch (err) {
+      console.warn('⚠️ RLS bypass failed:', err.message);
     }
-    
-    // 3. Fetch user with retry logic
-    let retries = 0;
-    const maxRetries = 3;
-    
-    while (!user && retries < maxRetries) {
-      console.log(`Attempt ${retries + 1} to fetch user...`);
-      
-      // Try standard upsert if SQL bypass didn't work
-      if (!userId) {
-        const { data: upsertResult, error: upsertError } = await adminSupabase
-          .from('users')
-          .upsert([{ email }], { 
-            onConflict: 'email',
-            returning: 'representation'
-          })
-          .select('*');
 
-        const { data, error } = await adminSupabase.from('users').select('id, email').eq('email', email);
+    // 2. Try to fetch or upsert user
+    const { data: upsertData, error: upsertError } = await adminSupabase
+      .from('users')
+      .upsert([{ email }], { onConflict: 'email', returning: 'representation' })
+      .select('*');
 
-         console.log('🎯 Confirmed user after upsert:', data);
+    if (upsertError) console.error('❌ Upsert error:', upsertError);
+    if (upsertData && upsertData.length) user = upsertData[0];
 
-        
-        if (upsertError) {
-          console.error(`❌ Upsert error on attempt ${retries + 1}:`, upsertError);
-        } else if (upsertResult && upsertResult[0]) {
-          console.log('✅ User upserted successfully');
-          user = upsertResult[0];
-          break;
-        }
-      }
-      
-      // Fetch user by ID if we have one from SQL bypass
-      if (userId) {
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', userId)
-          .single();
-        
-        if (userError) {
-          console.error(`❌ Failed to fetch user by ID on attempt ${retries + 1}:`, userError);
-        } else {
-          console.log('✅ User fetched by ID successfully');
-          user = userData;
-          break;
-        }
-      }
-      
-      // Fetch user by email as fallback
-      const { data: users, error: fetchError } = await supabase
+    // 3. If still no user, fetch manually
+    if (!user && userId) {
+      const { data, error } = await adminSupabase
         .from('users')
         .select('*')
-        .eq('email', email)
-        .limit(1);
-      
-      if (fetchError) {
-        console.error(`❌ Failed to fetch user by email on attempt ${retries + 1}:`, fetchError);
-      } else if (users && users[0]) {
-        console.log('✅ User fetched by email successfully');
-        user = users[0];
-        break;
-      }
-      
-      // Wait before retrying
-      await new Promise(resolve => setTimeout(resolve, 500));
-      retries++;
+        .eq('id', userId)
+        .single();
+      if (!error) user = data;
     }
-    
-    // Check if we successfully got a user
+
     if (!user) {
-      console.error('❌ Failed to create/fetch user after multiple attempts');
-      
-      // Last resort - direct insert with admin client if available
-      if (adminSupabase) {
-        console.log('🔑 Trying admin direct insert as last resort');
-        
-        const { data: adminResult, error: adminError } = await adminSupabase
-          .from('users')
-          .upsert([{ email }], { 
-            onConflict: 'email',
-            returning: 'representation'
-          })
-          .select('*');
-        
-        if (adminError) {
-          console.error('❌ Admin insert failed:', adminError);
-        } else if (adminResult && adminResult[0]) {
-          console.log('✅ Admin insert successful');
-          user = adminResult[0];
-        }
-      }
-      
-      // If still no user, return error
-      if (!user) {
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to create/retrieve user in database'
-        });
-      }
+      return res.status(500).json({ success: false, message: 'User not found after all attempts' });
     }
 
-    console.log('👤 User record:', { id: user.id, email: user.email });
+    console.log('👤 User:', { id: user.id, email: user.email });
 
-    // 4. Check plan limits
+    // 4. Check scraping limits
     const plan = user.plan || 'basic';
     const limits = { basic: 2, pro: 10, premium: 100 };
     const allowed = limits[plan];
 
     if ((user?.monthly_scrapes || 0) >= allowed) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         success: false,
         error: 'limit_reached',
-        message: `Monthly limit of ${allowed} scrapes reached for ${plan} plan`
+        message: `Monthly scrape limit reached for plan: ${plan}`
       });
     }
 
-    // 5. Scrape LinkedIn profile
-    console.log('🕸️ Starting LinkedIn scrape for URL:', profileUrl);
+    // 5. Scrape LinkedIn
+    console.log('🕷️ Scraping profile:', profileUrl);
     const parsed = await scraper(profileUrl);
-    console.log('✅ Scrape completed. Data keys:', Object.keys(parsed));
+    console.log('✅ Scraped:', Object.keys(parsed));
 
     // 6. Update user with scraped data
-    console.log('💾 Updating user with scraped data');
+    const updatePayload = {
+      name: parsed.name,
+      title: parsed.title,
+      location: parsed.location,
+      skills: parsed.skills,
+      certifications: parsed.certifications,
+      companies: parsed.companies,
+      education: parsed.education,
+      profilepicture: parsed.profilePicture || parsed.profilepicture || null,
+      connections: parsed.connections ? parseInt(parsed.connections) : null,
+      monthly_scrapes: (user.monthly_scrapes || 0) + 1,
+      last_scrape: new Date().toISOString()
+    };
+
     const { error: updateError } = await adminSupabase
       .from('users')
-      .update({
-        name: parsed.name,
-        title: parsed.title,
-        location: parsed.location,
-        skills: parsed.skills,
-        certifications: parsed.certifications,
-        companies: parsed.companies,
-        education: parsed.education,
-        profilepicture: parsed.profilePicture || parsed.profilepicture || null,
-        connections: parsed.connections ? parseInt(parsed.connections) : null,
-        monthly_scrapes: (user?.monthly_scrapes || 0) + 1,
-        last_scrape: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', user.id);
 
-    if (updateError) {
-      console.error('❌ Failed to update user with scraped data:', updateError);
-      // Continue anyway - we still want to return the scraped data
-    } else {
-      console.log('✅ User updated with scraped data');
-    }
+    if (updateError) console.error('❌ Update error:', updateError);
+    else console.log('✅ User updated');
 
-    // 7. Log scrape event
-    console.log('📝 Logging scrape event');
-    const { error: logError } = await supabase
+    // 7. Log the scrape
+    const { error: logError } = await adminSupabase
       .from('scrape_logs')
-      .insert([{ 
-        user_id: user.id,
-        profile_url: profileUrl,
-        scraped_at: new Date().toISOString()
-      }]);
-    
-    if (logError) {
-      console.warn('⚠️ Failed to log scrape event:', logError);
-    } else {
-      console.log('✅ Scrape event logged');
-    }
+      .insert([{ user_id: user.id, profile_url: profileUrl, scraped_at: new Date().toISOString() }]);
 
-    // 8. Send email notification (optional)
+    if (logError) console.warn('⚠️ Scrape log failed:', logError.message);
+    else console.log('✅ Scrape logged');
+
+    // 8. Send email
     try {
-      console.log('📨 Sending email notification');
       await sendEmail(email, parsed.name, parsed.skills);
-      console.log('✅ Email notification sent');
+      console.log('📨 Email sent');
     } catch (emailError) {
-      console.warn('⚠️ Failed to send email notification:', emailError);
+      console.warn('⚠️ Email failed:', emailError.message);
     }
 
-    // 9. Return success response
-    console.log('🎉 Scrape process completed successfully');
-    res.json({
+    // 9. Done
+    return res.json({
       success: true,
       email,
       user_id: user.id,
@@ -780,19 +671,18 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
         certifications: parsed.certifications,
         companies: parsed.companies,
         education: parsed.education,
-        profilepicture: parsed.profilePicture || parsed.profilepicture || null,
+        profilepicture: updatePayload.profilepicture,
         connections: parsed.connections
       },
       meta: {
-        scrapes_used: (user?.monthly_scrapes || 0) + 1,
+        scrapes_used: updatePayload.monthly_scrapes,
         scrapes_allowed: allowed,
-        plan: plan
+        plan
       }
     });
-
   } catch (err) {
-    console.error('❌ Scrape process error:', err);
-    res.status(500).json({
+    console.error('❌ Scrape failed:', err.message);
+    return res.status(500).json({
       success: false,
       error: 'scrape_failed',
       message: err.message,
@@ -800,6 +690,7 @@ app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
     });
   }
 });
+
 
 // Rate limiter setup
 const recommendationsLimiter = rateLimit({
