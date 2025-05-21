@@ -183,6 +183,30 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
+  const email = req.user?.email;
+
+  console.log('🧠 JWT Claims:', req.user);
+  console.log('📧 Checking email:', email);
+
+  const { data, error } = await adminSupabase
+    .from('users')
+    .select('*')
+    .eq('email', email);
+
+  if (error) {
+    console.error('❌ Supabase error:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+
+  res.json({ 
+    success: true, 
+    matchedUsers: data.length, 
+    email, 
+    data 
+  });
+});
+
 //Test adminSupabase
 app.get('/debug-users', async (req, res) => {
   const { data, error } = await adminSupabase.from('users').select('*').limit(5);
