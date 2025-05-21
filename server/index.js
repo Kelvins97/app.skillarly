@@ -344,42 +344,61 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
 // Protected Routes (using JWT token)
 //user-info
 app.get('/user-info', verifyAuthToken, async (req, res) => {
-  try {
-    const email = req.user.email;
+  console.log('➡️  [GET] /user-info hit');
 
-    // Fetch user safely
+  try {
+    const email = req.user?.email;
+
+    if (!email) {
+      console.warn('🚫 Missing email in token');
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    console.log('🔍 Looking up user:', email);
+
+    // Fetch user from Supabase
     const { data: users, error: fetchError } = await supabase
       .from('users')
       .select('id, email, name, email_notifications, plan, profilepicture')
       .eq('email', email)
       .limit(1);
 
-    const userData = users?.[0] || null;
+    if (fetchError) {
+      console.error('❌ Supabase fetch error:', fetchError);
+    }
+
+    const userData = users?.[0];
 
     if (!userData) {
-      console.error('Supabase: No user found');
+      console.warn('❌ No user found in Supabase for:', email);
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    // Get subscription info
+    console.log('✅ Supabase user:', userData);
+
+    // Get subscription plan
     const planResult = await pool.query(`
-      SELECT plan FROM subscriptions WHERE user_email = $1 AND is_active = TRUE
+      SELECT plan FROM subscriptions 
+      WHERE user_email = $1 AND is_active = TRUE
     `, [email]);
 
     const plan = planResult.rows[0]?.plan || userData.plan || 'basic';
+    console.log('📦 User plan:', plan);
 
-    // Count monthly scrapes
+    // Monthly scrapes count
     const scrapeResult = await pool.query(`
-      SELECT COUNT(*) as count FROM scrape_logs sl
+      SELECT COUNT(*) as count 
+      FROM scrape_logs sl
       JOIN users u ON u.id = sl.user_id
       WHERE u.email = $1 
       AND DATE_TRUNC('month', sl.scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
     `, [email]);
 
     const monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
+    console.log('📊 Monthly scrapes:', monthly_scrapes);
 
     res.json({
       success: true,
@@ -393,13 +412,15 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error in /user-info:', error);
+    console.error('🔥 Unhandled error in /user-info:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Internal server error',
+      error: error.message
     });
   }
 });
+
 
 
 //user-data
