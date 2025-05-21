@@ -417,28 +417,52 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 });
 
 
-//user-data
+//user-data ✅ user-data using adminSupabase to bypass RLS
 app.get('/user-data', verifyAuthToken, async (req, res) => {
   try {
-    const email = req.user.email;
+    const email = req.user?.email;
 
-    // Fetch user data safely
-    const { data: users, error: fetchError } = await supabase
+    if (!email) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized – missing email in token'
+      });
+    }
+
+    console.log('➡️  [GET] /user-data for:', email);
+
+    // Fetch user data from Supabase (admin client bypasses RLS)
+    const { data: users, error: fetchError } = await adminSupabase
       .from('users')
       .select('name, skills, certifications, headline, profilepicture')
       .eq('email', email)
       .limit(1);
 
-    const userData = users?.[0] || null;
+    if (fetchError) {
+      console.error('❌ Supabase fetch error:', fetchError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Database error fetching user data'
+      });
+    }
+
+    const userData = users?.[0];
 
     if (!userData) {
+      console.warn('❌ No user data found for:', email);
       return res.status(404).json({
         success: false,
         message: 'User data not found'
       });
     }
 
-    // Sample recommendations (can be dynamic later)
+    console.log('✅ Found user data:', {
+      name: userData.name,
+      skills: userData.skills?.length || 0,
+      certifications: userData.certifications?.length || 0
+    });
+
+    // Static recommendations (for now)
     const recommendations = [
       'Consider learning GraphQL for API development',
       'Your profile would benefit from showcasing more projects',
@@ -456,14 +480,14 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching user data:', error);
+    console.error('🔥 Error in /user-data:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Error fetching user data'
+      message: 'Error fetching user data',
+      error: error.message
     });
   }
 });
-
 
 
 // Update Preferences - protected with JWT auth
