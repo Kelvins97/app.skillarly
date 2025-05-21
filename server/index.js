@@ -368,7 +368,8 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       .limit(1);
 
     if (fetchError) {
-      console.error('❌ Supabase fetch error:', fetchError);
+      console.error('❌ Supabase fetch error:', fetchError.message);
+      return res.status(500).json({ success: false, message: 'Database error' });
     }
 
     const userData = users?.[0];
@@ -381,34 +382,48 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       });
     }
 
-    console.log('✅ Supabase user:', userData);
+    console.log('✅ Supabase user:', {
+      id: userData.id,
+      email: userData.email,
+      name: userData.name,
+      plan: userData.plan
+    });
 
-// Get subscription plan
-let plan = userData.plan || 'basic';
-let monthly_scrapes = 0;
+    const userId = userData.id;
+    let plan = userData.plan || 'basic';
+    let monthly_scrapes = 0;
 
-try {
-  const planResult = await pool.query(`
-    SELECT plan FROM subscriptions WHERE user_email = $1 AND is_active = TRUE
-  `, [email]);
-  plan = planResult.rows[0]?.plan || plan;
-} catch (err) {
-  console.error('🔥 Error fetching subscription plan:', err.message);
-}
-// Monthly scrapes count
-try {
-  const scrapeResult = await pool.query(`
-    SELECT COUNT(*) as count FROM scrape_logs sl
-    JOIN users u ON u.id = sl.user_id
-    WHERE u.email = $1 
-    AND DATE_TRUNC('month', sl.scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
-  `, [email]);
-  monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
-} catch (err) {
-  console.error('🔥 Error counting scrapes:', err.message);
-}
-console.log('📊 Monthly scrapes:', monthly_scrapes);
+    // 1. Check active subscription (based on user_id now!)
+    try {
+      const planResult = await pool.query(`
+        SELECT plan FROM subscriptions 
+        WHERE user_id = $1 AND is_active = TRUE
+        ORDER BY started_at DESC
+        LIMIT 1
+      `, [userId]);
 
+      plan = planResult.rows[0]?.plan || plan;
+    } catch (err) {
+      console.error('🔥 Error fetching subscription plan:', err.message);
+    }
+
+    // 2. Count scrapes this month
+    try {
+      const scrapeResult = await pool.query(`
+        SELECT COUNT(*) AS count 
+        FROM scrape_logs 
+        WHERE user_id = $1 
+          AND DATE_TRUNC('month', scraped_at) = DATE_TRUNC('month', CURRENT_DATE)
+      `, [userId]);
+
+      monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
+    } catch (err) {
+      console.error('🔥 Error counting scrapes:', err.message);
+    }
+
+    console.log('📊 Monthly scrapes:', monthly_scrapes);
+
+    // 3. Send response
     res.json({
       success: true,
       id: userData.id,
@@ -429,7 +444,6 @@ console.log('📊 Monthly scrapes:', monthly_scrapes);
     });
   }
 });
-
 
 
 //user-data
