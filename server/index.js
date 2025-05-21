@@ -404,7 +404,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 
       plan = planResult.rows[0]?.plan || plan;
     } catch (err) {
-      console.error('🔥 Error fetching subscription plan:', err.message);
+      console.error('🔥 Error fetching subscription plan:', err);
     }
 
     // 2. Count scrapes this month
@@ -418,7 +418,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 
       monthly_scrapes = parseInt(scrapeResult.rows[0]?.count || '0', 10);
     } catch (err) {
-      console.error('🔥 Error counting scrapes:', err.message);
+      console.error('🔥 Error counting scrapes:', err);
     }
 
     console.log('📊 Monthly scrapes:', monthly_scrapes);
