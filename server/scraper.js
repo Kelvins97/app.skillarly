@@ -2,13 +2,6 @@ import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
 export default async function scrapeLinkedInProfile(profileUrl) {
-  /*const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    defaultViewport: { width: 1366, height: 768 }
-  });*/
-
    const browser = await puppeteer.launch({
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
@@ -32,9 +25,11 @@ export default async function scrapeLinkedInProfile(profileUrl) {
 
   try {
     await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+    //await page.waitForTimeout(Math.floor(Math.random() * 3000) + 2000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
     await autoScroll(page);
-    await page.waitForTimeout(3000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
 
     const data = await page.evaluate(() => {
       function getTextBySelectors(selectors) {
