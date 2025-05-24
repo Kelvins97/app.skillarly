@@ -95,6 +95,12 @@ export const initializeAuth = () => {
     try {
       const { code, state, error, error_description } = req.query;
 
+      if (!user.email) {
+     console.warn('⚠️ Missing email for user. Cannot generate JWT.');
+     return res.redirect(`${process.env.FRONTEND_URL}/login?error=missing_email`);
+     }
+
+
       if (error) {
         return res.redirect(`${process.env.FRONTEND_URL}/login?error=${error}&details=${encodeURIComponent(error_description || '')}`);
       }
@@ -122,6 +128,17 @@ export const initializeAuth = () => {
       }
 
       const accessToken = tokenData.access_token;
+
+  const emailRes = await fetch('https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))', {
+  headers: {
+    Authorization: `Bearer ${tokenData.access_token}`
+  }
+});
+
+const emailJson = await emailRes.json();
+const email = emailJson.elements?.[0]?.['handle~']?.emailAddress;
+if (email) user.email = email;
+
 
       // Fetch profile data
       const meRes = await fetch('https://api.linkedin.com/v2/me', {
