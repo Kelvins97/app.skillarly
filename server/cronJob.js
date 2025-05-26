@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 //import { openai } from './openaiClient'; // setup with your key
-import { supabase } from './supabase';
+import { supabase } from '../supabase.js';
 
 cron.schedule('0 * * * *', async () => {
   console.log('⏰ Running recommendation cron job');
