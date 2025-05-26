@@ -29,3 +29,5 @@ app.post('/upload-resume', verifyAuthToken, upload.single('resume'), async (req,
     res.status(500).json({ error: 'Failed to process resume' });
   }
 });
+
+export default router;
