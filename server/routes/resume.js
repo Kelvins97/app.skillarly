@@ -1,6 +1,6 @@
 import multer from 'multer';
-import { parseResume } from '../utils/parseResume';
-import { supabase } from '../utils/supabase'; // service role client
+import { parseResume } from '../parseResume';
+import { supabase } from '../supabase'; // service role client
 
 const upload = multer({ dest: 'uploads/' });
 
