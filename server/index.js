@@ -194,7 +194,6 @@ app.get('/health', (req, res) => {
 });
 
 // Resume Upload + Parsing Route
-import resumeRoutes from './routes/resume.js';
 app.use('/resume', authenticate, resumeRoutes);
 
 app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
