@@ -95,6 +95,10 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+//Resume Routes
+app.use(express.json());
+app.use(resumeRoutes);
+
 // 7. Redis Connection
 (async () => {
   try {
@@ -169,6 +173,7 @@ app.get('/go', (req, res) => {
   
   return res.redirect(baseUrl);
 });
+
 
 // Health Check Endpoint
 app.get('/health', (req, res) => {
@@ -660,151 +665,6 @@ app.post('/subscribe', verifyAuthToken, async (req, res) => {
     return res.status(500).json({
       error: "Internal server error",
       userMessage: "A system error occurred. Our team has been notified."
-    });
-  }
-});
-
-//Scrape profile
-app.post('/scrape-profile', verifyAuthToken, async (req, res) => {
-  const { profileUrl } = req.body;
-  const email = req.user.email;
-
-  if (!profileUrl || !profileUrl.includes('linkedin.com/in/')) {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid LinkedIn profile URL'
-    });
-  }
-
-  console.log('📋 Starting scrape for:', email);
-
-  try {
-    let user = null;
-    let userId = null;
-
-    // 1. Try bypass RLS function
-    try {
-      const { data: sqlResult, error } = await adminSupabase.rpc('create_user_bypass_rls', {
-        user_email: email
-      });
-      if (error) throw error;
-      console.log('✅ RLS bypass success:', sqlResult);
-      userId = sqlResult.user_id;
-    } catch (err) {
-      console.warn('⚠️ RLS bypass failed:', err.message);
-    }
-
-    // 2. Try to fetch or upsert user
-    const { data: upsertData, error: upsertError } = await adminSupabase
-      .from('users')
-      .upsert([{ email }], { onConflict: 'email', returning: 'representation' })
-      .select('*');
-
-    if (upsertError) console.error('❌ Upsert error:', upsertError);
-    if (upsertData && upsertData.length) user = upsertData[0];
-
-    // 3. If still no user, fetch manually
-    if (!user && userId) {
-      const { data, error } = await adminSupabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      if (!error) user = data;
-    }
-
-    if (!user) {
-      return res.status(500).json({ success: false, message: 'User not found after all attempts' });
-    }
-
-    console.log('👤 User:', { id: user.id, email: user.email });
-
-    // 4. Check scraping limits
-    const plan = user.plan || 'basic';
-    const limits = { basic: 2, pro: 10, premium: 100 };
-    const allowed = limits[plan];
-
-    if ((user?.monthly_scrapes || 0) >= allowed) {
-      return res.status(403).json({
-        success: false,
-        error: 'limit_reached',
-        message: `Monthly scrape limit reached for plan: ${plan}`
-      });
-    }
-
-    // 5. Scrape LinkedIn
-    console.log('🕷️ Scraping profile:', profileUrl);
-    const parsed = await scraper(profileUrl);
-    console.log('✅ Scraped:', Object.keys(parsed));
-
-    // 6. Update user with scraped data
-    const updatePayload = {
-      name: parsed.name,
-      title: parsed.title,
-      location: parsed.location,
-      skills: parsed.skills,
-      certifications: parsed.certifications,
-      companies: parsed.companies,
-      education: parsed.education,
-      profilepicture: parsed.profilePicture || parsed.profilepicture || null,
-      connections: parsed.connections ? parseInt(parsed.connections) : null,
-      monthly_scrapes: (user.monthly_scrapes || 0) + 1,
-      last_scrape: new Date().toISOString()
-    };
-
-    const { error: updateError } = await adminSupabase
-      .from('users')
-      .update(updatePayload)
-      .eq('id', user.id);
-
-    if (updateError) console.error('❌ Update error:', updateError);
-    else console.log('✅ User updated');
-
-    // 7. Log the scrape
-    const { error: logError } = await adminSupabase
-      .from('scrape_logs')
-      .insert([{ user_id: user.id, profile_url: profileUrl, scraped_at: new Date().toISOString() }]);
-
-    if (logError) console.warn('⚠️ Scrape log failed:', logError.message);
-    else console.log('✅ Scrape logged');
-
-    // 8. Send email
-    try {
-      await sendEmail(email, parsed.name, parsed.skills);
-      console.log('📨 Email sent');
-    } catch (emailError) {
-      console.warn('⚠️ Email failed:', emailError.message);
-    }
-
-    // 9. Done
-    return res.json({
-      success: true,
-      email,
-      user_id: user.id,
-      data: {
-        name: parsed.name,
-        title: parsed.title,
-        location: parsed.location,
-        skills: parsed.skills,
-        certifications: parsed.certifications,
-        companies: parsed.companies,
-        education: parsed.education,
-        profilepicture: updatePayload.profilepicture,
-        connections: parsed.connections
-      },
-      meta: {
-        scrapes_used: updatePayload.monthly_scrapes,
-        scrapes_allowed: allowed,
-        plan
-      }
-    });
-  } catch (err) {
-    console.error('❌ Scrape failed:', err.message);
-    return res.status(500).json({
-      success: false,
-      error: 'scrape_failed',
-      message: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
