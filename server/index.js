@@ -20,7 +20,7 @@ import jwt from 'jsonwebtoken';
 import { verifyAuthToken } from './authMiddleware.js';
 import authRoutes from './authRoutes.js';
 import devSeedRoute from './dev-seed.js';
-import resumeRoutes from './routes/resume.js';
+//import resumeRoutes from './routes/resume.js';
 import cron from 'node-cron';
 import './cronJob.js';
 
