@@ -21,17 +21,28 @@ import { verifyAuthToken } from './authMiddleware.js';
 import authRoutes from './authRoutes.js';
 import devSeedRoute from './dev-seed.js';
 import resumeRoutes from './routes/resume.js';
+import cron from 'node-cron';
+import './cronJob.js';
 
 // 1. Environment Configuration
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 // 2. Initialize Core Services
 const app = express();
+app.use(helmet());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
 const stripe = stripePackage(process.env.STRIPE_SECRET_KEY);
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const redisClient = createClient({ url: process.env.REDIS_URL });
+
+// Serve uploaded resumes statically
+app.use('/resumes', express.static(path.join(__dirname, 'resumes')));
 
 // 3. Enhanced CORS Configuration
 const corsOptions = {
@@ -97,7 +108,7 @@ app.use(passport.session());
 
 //Resume Routes
 app.use(express.json());
-app.use(resumeRoutes);
+app.use(resumeRoutes); 
 
 // 7. Redis Connection
 (async () => {
@@ -160,18 +171,11 @@ app.get('/auth-status', (req, res) => {
   });
 });
 
-// Redirect LinkedIn profile visits
-app.get('/go', (req, res) => {
-  const ref = req.get('Referrer') || '';
-  const baseUrl = process.env.FRONTEND_URL;
-  
-  if (ref.includes('linkedin.com/in/')) {
-    return res.redirect(
-      `${baseUrl}/?profile=${encodeURIComponent(ref)}`
-    );
-  }
-  
-  return res.redirect(baseUrl);
+// Rate limit OpenAI-related routes
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many AI requests. Try again later.'
 });
 
 
@@ -188,6 +192,10 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Resume Upload + Parsing Route
+import resumeRoutes from './routes/resume.js';
+app.use('/resume', authenticate, resumeRoutes);
 
 app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
   const email = req.user?.email;
@@ -353,72 +361,10 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
 // Protected Routes (using JWT token)
 // user-info using adminSupabase only
 app.get('/user-info', verifyAuthToken, async (req, res) => {
-  console.log('➡️  [GET] /user-info hit');
-
-  try {
-    const email = req.user?.email;
-
-    if (!email) {
-      console.warn('🚫 Missing email in token');
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
-
-    console.log('🔍 Looking up user:', email);
-
-    // Fetch user from adminSupabase
-    const { data: users, error: fetchError } = await adminSupabase
-      .from('users')
-      .select('id, email, name, email_notifications, plan, profilepicture, monthly_scrapes')
-      .eq('email', email)
-      .limit(1);
-
-    if (fetchError) {
-      console.error('❌ Supabase fetch error:', fetchError.message);
-      return res.status(500).json({ success: false, message: 'Database error' });
-    }
-
-    const userData = users?.[0];
-
-    if (!userData) {
-      console.warn('❌ No user found in Supabase for:', email);
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    console.log('✅ Supabase user:', {
-      id: userData.id,
-      email: userData.email,
-      name: userData.name,
-      plan: userData.plan
-    });
-
-    const plan = userData.plan || 'basic';
-    const monthly_scrapes = userData.monthly_scrapes || 0;
-
-    console.log('📊 Monthly scrapes:', monthly_scrapes);
-
-    // Send response
-    res.json({
-      success: true,
-      id: userData.id,
-      email: userData.email,
-      name: userData.name,
-      plan,
-      monthly_scrapes,
-      email_notifications: userData.email_notifications !== false,
-      profilepicture: userData.profilepicture || null
-    });
-
-  } catch (error) {
-    console.error('🔥 Unhandled error in /user-info:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: error.message
-    });
-  }
+  const email = req.user?.email;
+  const { data, error } = await adminSupabase.from('users').select('*').eq('email', email).limit(1);
+  if (error || !data?.length) return res.status(404).json({ success: false });
+  res.json({ success: true, ...data[0] });
 });
 
 
@@ -507,9 +453,9 @@ const validatePreferences = (req, res, next) => {
     frequency: Joi.string().valid('daily', 'weekly', 'monthly')
   });
   // ... validation logic ...
-};
+};*/
 
-//app.post('/update-preferences', validatePreferences, ...);*/
+
 
 // Update Preferences - protected with JWT auth
 app.post('/update-preferences', verifyAuthToken, async (req, res) => {
@@ -856,37 +802,6 @@ app.post('/subscription', verifyAuthToken, async (req, res) => {
   }
 });
 
-// Log Scrape - protected with auth
-app.post('/scrape-log', verifyAuthToken, async (req, res) => {
-  try {
-    const email = req.user.email;
-    console.log(`📝 Logging scrape for: ${email}`);
-
-    // Get user ID securely with adminSupabase
-    const { data: users, error: userError } = await adminSupabase
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .limit(1);
-
-    const user = users?.[0];
-
-    if (userError || !user) {
-      console.error('❌ User fetch error:', userError?.message || 'User not found');
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Log scrape in the database (assuming table `scrape_logs(user_id)` exists)
-    await pool.query(`INSERT INTO scrape_logs (user_id) VALUES ($1)`, [user.id]);
-
-    console.log('✅ Scrape log entry created');
-    res.json({ success: true });
-
-  } catch (error) {
-    console.error('🔥 Scrape log error:', error.message);
-    res.status(500).json({ error: 'Failed to log scrape', message: error.message });
-  }
-});
 
 
 // Send Email - protected with auth
@@ -902,33 +817,6 @@ app.post('/mpesa/callback', (req, res) => {
   res.sendStatus(200);
 });
 
-// Reset monthly scrapes (for CRON jobs or admin dashboard)
-app.post('/reset-scrapes', async (req, res) => {
-  const adminKey = req.headers['x-admin-key'];
-
-  if (adminKey !== process.env.ADMIN_SECRET_KEY) {
-    console.warn('❌ Unauthorized reset attempt');
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-
-  try {
-    const { error } = await adminSupabase
-      .from('users')
-      .update({ monthly_scrapes: 0 });
-
-    if (error) {
-      console.error('❌ Supabase update error:', error.message);
-      return res.status(500).json({ error: 'reset_failed', message: error.message });
-    }
-
-    console.log('✅ Monthly scrapes reset successfully');
-    res.json({ success: true, message: 'Monthly scrapes reset' });
-
-  } catch (e) {
-    console.error('🔥 Unexpected reset error:', e.message);
-    res.status(500).json({ error: 'reset_failed', message: e.message });
-  }
-});
 
 
 // Job APIs - protected with auth
