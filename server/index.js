@@ -20,6 +20,7 @@ import jwt from 'jsonwebtoken';
 import { verifyAuthToken } from './authMiddleware.js';
 import authRoutes from './authRoutes.js';
 import devSeedRoute from './dev-seed.js';
+import resumeRoutes from './routes/resume.js';
 
 // 1. Environment Configuration
 dotenv.config();
