@@ -25,7 +25,7 @@ import cron from 'node-cron';
 import './cronJob.js';
 
 // 1. Environment Configuration
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+//const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 // 2. Initialize Core Services
@@ -42,7 +42,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
 // Serve uploaded resumes statically
-app.use('/resumes', express.static(path.join(__dirname, 'resumes')));
+//app.use('/resumes', express.static(path.join(__dirname, 'resumes')));
 
 // 3. Enhanced CORS Configuration
 const corsOptions = {
@@ -108,7 +108,7 @@ app.use(passport.session());
 
 //Resume Routes
 app.use(express.json());
-app.use(resumeRoutes); 
+//app.use(resumeRoutes); 
 
 // 7. Redis Connection
 (async () => {
@@ -194,7 +194,7 @@ app.get('/health', (req, res) => {
 });
 
 // Resume Upload + Parsing Route
-app.use('/resume', authenticate, resumeRoutes);
+//app.use('/resume', authenticate, resumeRoutes);
 
 app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
   const email = req.user?.email;
