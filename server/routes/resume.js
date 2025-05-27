@@ -1,5 +1,5 @@
 import multer from 'multer';
-import { parseResumeFromBuffer } from '../parseResume.js';
+import { parseResumeBuffer } from '../parseResume.js';
 import { supabase } from '../supabase.js';
 import fs from 'fs';
 import path from 'path';
