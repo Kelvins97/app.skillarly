@@ -1,6 +1,22 @@
-// For Node.js backend on Render - handles uploaded files or URLs
+import fs from 'fs';
 import pdfParse from 'pdf-parse';
 
+// Original function (for backward compatibility)
+export async function parseResume(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    
+    const dataBuffer = fs.readFileSync(filePath);
+    return await parseResumeFromBuffer(dataBuffer);
+  } catch (error) {
+    console.error('Error parsing resume:', error.message);
+    throw error;
+  }
+}
+
+// New buffer-based function (works with uploads)
 export async function parseResumeFromBuffer(buffer) {
   try {
     const pdfData = await pdfParse(buffer);
@@ -17,31 +33,15 @@ export async function parseResumeFromBuffer(buffer) {
       raw: rawText
     };
   } catch (error) {
-    console.error('Error parsing PDF:', error);
+    console.error('Error parsing PDF buffer:', error);
     throw new Error(`Failed to parse PDF: ${error.message}`);
   }
 }
 
-// For handling file uploads in Express.js
-export async function parseResumeFromUpload(req, res) {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+// Alias for the function you're trying to import
+export const parseResumeBuffer = parseResumeFromBuffer;
 
-    if (req.file.mimetype !== 'application/pdf') {
-      return res.status(400).json({ error: 'Only PDF files are allowed' });
-    }
-
-    const result = await parseResumeFromBuffer(req.file.buffer);
-    res.json(result);
-  } catch (error) {
-    console.error('Error in parseResumeFromUpload:', error);
-    res.status(500).json({ error: error.message });
-  }
-}
-
-// For parsing from URL
+// URL-based function
 export async function parseResumeFromURL(url) {
   try {
     const response = await fetch(url);
@@ -57,33 +57,6 @@ export async function parseResumeFromURL(url) {
     console.error('Error parsing PDF from URL:', error);
     throw new Error(`Failed to parse PDF from URL: ${error.message}`);
   }
-}
-
-// Example Express.js setup
-export function setupResumeRoutes(app) {
-  const multer = require('multer');
-  const upload = multer({ 
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
-  });
-
-  // Upload endpoint
-  app.post('/api/parse-resume', upload.single('resume'), parseResumeFromUpload);
-
-  // URL endpoint
-  app.post('/api/parse-resume-url', async (req, res) => {
-    try {
-      const { url } = req.body;
-      if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-      }
-      
-      const result = await parseResumeFromURL(url);
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 }
 
 function extractName(text) {
