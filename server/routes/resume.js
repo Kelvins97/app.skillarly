@@ -1,8 +1,11 @@
+import express from 'express';
 import multer from 'multer';
 import { parseResumeBuffer } from '../parseResume.js';
 import { supabase } from '../supabase.js';
 import path from 'path';
 import { verifyAuthToken } from '../authMiddleware.js';
+
+const router = express.Router();
 
 // Configure multer with memory storage instead of disk storage
 const storage = multer.memoryStorage();
@@ -30,7 +33,7 @@ const upload = multer({
 });
 
 // Upload endpoint
-export const uploadResume = async (req, res) => {
+const uploadResume = async (req, res) => {
   try {
     // Verify authentication
     const authResult = verifyAuthToken(req);
@@ -87,3 +90,9 @@ export const uploadResume = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// Define routes
+router.post('/upload', uploadResume);
+
+// Export the router as default
+export default router;
