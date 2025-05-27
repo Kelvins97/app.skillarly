@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { parseResumeBuffer } from '../parseResume.js';
+import { parseResumeFromBuffer } from '../parseResume.js';
 import { supabase } from '../supabase.js';
 import path from 'path';
 import { verifyAuthToken } from '../authMiddleware.js';
