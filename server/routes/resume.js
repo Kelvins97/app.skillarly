@@ -3,7 +3,7 @@ import { parseResumeBuffer } from '../parseResume.js';
 import { supabase } from '../supabase.js';
 import fs from 'fs';
 import path from 'path';
-import { verifyAuthToken } from './authMiddleware.js';
+import { verifyAuthToken } from '../authMiddleware.js';
 
 // Ensure uploads directory exists
 const uploadsDir = './uploads';
