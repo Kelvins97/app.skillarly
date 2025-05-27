@@ -1,4 +1,3 @@
-// parseResume.js - Buffer-only version (no file system access)
 import pdfParse from 'pdf-parse';
 
 // Main function that works with uploaded file buffers
