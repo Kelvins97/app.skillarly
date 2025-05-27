@@ -1,8 +1,9 @@
 import multer from 'multer';
-import { parseResume } from '../parseResume.js';
+import { parseResumeBuffer } from '../parseResume.js';
 import { supabase } from '../supabase.js';
 import fs from 'fs';
 import path from 'path';
+import { verifyAuthToken } from './middleware.js';
 
 // Ensure uploads directory exists
 const uploadsDir = './uploads';
