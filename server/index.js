@@ -26,7 +26,6 @@ import cron from 'node-cron';
 import './cronJob.js';
 
 // 1. Environment Configuration
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 // 2. Initialize Core Services
