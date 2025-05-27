@@ -1,5 +1,10 @@
 import pdfParse from 'pdf-parse';
 
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  console.error('Stack trace:', error.stack);
+});
+
 // Main function that works with uploaded file buffers
 export async function parseResumeFromBuffer(buffer) {
   try {
