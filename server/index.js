@@ -22,7 +22,7 @@ import authRoutes from './authRoutes.js'
 import devSeedRoute from './dev-seed.js';
 import resumeRoutes from './routes/resume.js';
 import cron from 'node-cron';
-import helmet from 'helmet'
+import helmet from 'helmet';
 import './cronJob.js';
 
 // 1. Environment Configuration
