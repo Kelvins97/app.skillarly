@@ -1,4 +1,8 @@
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
+import pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.js';
+
+// Configure worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export async function parseResumeBuffer(buffer) {
   try {
