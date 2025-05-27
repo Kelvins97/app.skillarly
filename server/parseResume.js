@@ -1,143 +1,87 @@
 import fs from 'fs';
 import path from 'path';
-import pdfParse from 'pdf-parse';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-export async function parseResumeBuffer(buffer) {
+// Debug function to see what files exist
+export function debugFileSystem() {
+  console.log('Current working directory:', process.cwd());
+  
   try {
-    const pdfData = await pdfParse(buffer);
-    const rawText = pdfData.text;
-
-    return {
-      name: extractName(rawText),
-      email: extractEmail(rawText),
-      phone: extractPhone(rawText),
-      skills: extractSkills(rawText),
-      certifications: extractCertifications(rawText),
-      experience: extractExperience(rawText),
-      education: extractEducation(rawText),
-      raw: rawText
-    };
+    console.log('Files in current directory:');
+    const files = fs.readdirSync('.');
+    files.forEach(file => {
+      const stats = fs.statSync(file);
+      console.log(`  ${file} (${stats.isDirectory() ? 'directory' : 'file'})`);
+    });
   } catch (error) {
-    console.error('Error parsing resume buffer:', error.message);
-    throw error;
+    console.error('Error reading current directory:', error.message);
   }
+  
+  // Check if test directory exists
+  try {
+    if (fs.existsSync('./test')) {
+      console.log('\nFiles in ./test directory:');
+      const testFiles = fs.readdirSync('./test');
+      testFiles.forEach(file => {
+        const filePath = path.join('./test', file);
+        const stats = fs.statSync(filePath);
+        console.log(`  ${file} (${stats.isDirectory() ? 'directory' : 'file'})`);
+        
+        if (stats.isDirectory()) {
+          try {
+            const subFiles = fs.readdirSync(filePath);
+            subFiles.forEach(subFile => {
+              console.log(`    ${subFile}`);
+            });
+          } catch (err) {
+            console.error(`    Error reading ${file}: ${err.message}`);
+          }
+        }
+      });
+    } else {
+      console.log('\n./test directory does not exist');
+    }
+  } catch (error) {
+    console.error('Error checking test directory:', error.message);
+  }
+  
+  // Check specific file
+  const targetFile = './test/data/05-versions-space.pdf';
+  console.log(`\nChecking for ${targetFile}:`, fs.existsSync(targetFile));
 }
 
-// Helper function to find resume files in common locations
-export function findResumeFiles(searchDir = '.') {
-  const resumeFiles = [];
+// Modified parseResume with better error handling
+export async function parseResumeWithDebug(filePath) {
+  console.log(`Attempting to parse: ${filePath}`);
+  console.log(`Absolute path: ${path.resolve(filePath)}`);
+  console.log(`File exists: ${fs.existsSync(filePath)}`);
   
-  function searchDirectory(dir) {
+  if (!fs.existsSync(filePath)) {
+    console.error(`File not found: ${filePath}`);
+    
+    // Try to find similar files
+    const dir = path.dirname(filePath);
+    const filename = path.basename(filePath);
+    
+    console.log(`Looking for similar files in ${dir}:`);
     try {
-      const items = fs.readdirSync(dir);
-      
-      for (const item of items) {
-        const itemPath = path.join(dir, item);
-        const stats = fs.statSync(itemPath);
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        const pdfFiles = files.filter(f => f.toLowerCase().endsWith('.pdf'));
+        console.log('PDF files found:', pdfFiles);
         
-        if (stats.isDirectory() && !item.startsWith('.')) {
-          searchDirectory(itemPath);
-        } else if (stats.isFile() && item.toLowerCase().endsWith('.pdf')) {
-          resumeFiles.push(itemPath);
+        if (pdfFiles.length > 0) {
+          const alternativeFile = path.join(dir, pdfFiles[0]);
+          console.log(`Trying alternative file: ${alternativeFile}`);
+          return parseResumeWithDebug(alternativeFile);
         }
       }
     } catch (error) {
-      // Skip directories we can't read
-      console.warn(`Could not read directory ${dir}: ${error.message}`);
+      console.error('Error searching for alternatives:', error.message);
     }
+    
+    throw new Error(`File not found: ${filePath}`);
   }
   
-  searchDirectory(searchDir);
-  return resumeFiles;
-}
-
-function extractName(text) {
-  // Try multiple patterns for name extraction
-  const patterns = [
-    /^[A-Z][a-z]+\s+[A-Z][a-z]+/m,  // First line pattern
-    /^([A-Z][a-z]+(?:\s+[A-Z][a-z]*)*)/m,  // More flexible first line
-    /(?:Name|Full Name):\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]*)*)/i  // Labeled name
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match[1] || match[0];
-  }
-  
-  return null;
-}
-
-function extractEmail(text) {
-  const match = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/);
-  return match ? match[0] : null;
-}
-
-function extractPhone(text) {
-  const patterns = [
-    /(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{2,4}\)?[\s-]?)?\d{3,4}[\s-]?\d{4}/,
-    /\(\d{3}\)\s*\d{3}-\d{4}/,
-    /\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match[0];
-  }
-  
-  return null;
-}
-
-function extractSkills(text) {
-  const skillKeywords = [
-    'JavaScript', 'Python', 'Node.js', 'React', 'SQL', 'Docker', 'AWS', 
-    'Java', 'C++', 'TypeScript', 'Vue.js', 'Angular', 'MongoDB', 'PostgreSQL',
-    'Git', 'Linux', 'Kubernetes', 'Jenkins', 'HTML', 'CSS', 'PHP', 'Ruby'
-  ];
-  
-  return skillKeywords.filter(skill => 
-    new RegExp(`\\b${skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)
-  );
-}
-
-function extractCertifications(text) {
-  const certPatterns = [
-    /AWS Certified[^.\n]*/gi,
-    /Google Certified[^.\n]*/gi,
-    /Microsoft Certified[^.\n]*/gi,
-    /CompTIA[^.\n]*/gi,
-    /Cisco Certified[^.\n]*/gi,
-    /Oracle Certified[^.\n]*/gi,
-    /Certified[^.\n]*Professional/gi,
-    /Professional[^.\n]*Certified/gi
-  ];
-  
-  const certifications = new Set();
-  certPatterns.forEach(pattern => {
-    const matches = text.match(pattern) || [];
-    matches.forEach(match => certifications.add(match.trim()));
-  });
-  
-  return Array.from(certifications);
-}
-
-function extractExperience(text) {
-  const lines = text.split('\n').map(line => line.trim());
-  const experienceKeywords = /experience|worked at|role|position|employment|job|company|developer|engineer|analyst|manager/i;
-  
-  return lines
-    .filter(line => line.length > 10 && experienceKeywords.test(line))
-    .slice(0, 5);
-}
-
-function extractEducation(text) {
-  const lines = text.split('\n').map(line => line.trim());
-  const educationKeywords = /university|college|bachelor|master|ph\.?d|degree|education|school|institute/i;
-  
-  return lines
-    .filter(line => line.length > 10 && educationKeywords.test(line))
-    .slice(0, 5);
+  // Your existing parseResume logic here
+  // ... (rest of the parsing code)
 }
