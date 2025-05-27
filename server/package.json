@@ -37,7 +37,7 @@
     "puppeteer-core":"^24.9.0",
     "@sparticuz/chromium": "132.0.0",
     "multer": "2.0.0",
-    "pdfjs-dist": "3.11.0"
+    "pdfjs-dist": "5.2.133"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
