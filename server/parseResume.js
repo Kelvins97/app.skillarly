@@ -1,4 +1,3 @@
-import fs from 'fs';
 import pdfParse from 'pdf-parse';
 
 // Original function (for backward compatibility)
