@@ -6,26 +6,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export async function parseResume(filePath) {
+export async function parseResumeBuffer(buffer) {
   try {
-    // Convert relative path to absolute if needed
-    const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
-    
-    // Check if file exists
-    if (!fs.existsSync(absolutePath)) {
-      throw new Error(`File not found: ${absolutePath}`);
-    }
-    
-    // Check if it's actually a file (not a directory)
-    const stats = fs.statSync(absolutePath);
-    if (!stats.isFile()) {
-      throw new Error(`Path is not a file: ${absolutePath}`);
-    }
-    
-    console.log(`Parsing resume from: ${absolutePath}`);
-    
-    const dataBuffer = fs.readFileSync(absolutePath);
-    const pdfData = await pdfParse(dataBuffer);
+    const pdfData = await pdfParse(buffer);
     const rawText = pdfData.text;
 
     return {
@@ -39,7 +22,7 @@ export async function parseResume(filePath) {
       raw: rawText
     };
   } catch (error) {
-    console.error('Error parsing resume:', error.message);
+    console.error('Error parsing resume buffer:', error.message);
     throw error;
   }
 }
