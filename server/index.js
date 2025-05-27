@@ -18,21 +18,22 @@ import RedisStore from 'connect-redis';
 import { createClient } from 'redis';
 import jwt from 'jsonwebtoken';
 import { verifyAuthToken } from './authMiddleware.js';
-import authRoutes from './authRoutes.js';
+import authRoutes from './authRoutes.js'
 import devSeedRoute from './dev-seed.js';
-//import resumeRoutes from './routes/resume.js';
+import resumeRoutes from './routes/resume.js';
 import cron from 'node-cron';
+import helmet from 'helmet'
 import './cronJob.js';
 
 // 1. Environment Configuration
-//const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 // 2. Initialize Core Services
 const app = express();
-//app.use(helmet());
+app.use(helmet());
 app.use(cors());
-//app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 //app.use(morgan('dev'));
 const stripe = stripePackage(process.env.STRIPE_SECRET_KEY);
@@ -41,8 +42,12 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
-// Serve uploaded resumes statically
-//app.use('/resumes', express.static(path.join(__dirname, 'resumes')));
+// Serve uploaded resumes statically -- Resume Routes
+app.use(express.json());
+app.use('/resume', authenticate, resumeRoutes);
+app.use(resumeRoutes); 
+app.use('/resumes', express.static(path.join(__dirname, 'resumes')));
+
 
 // 3. Enhanced CORS Configuration
 const corsOptions = {
@@ -106,9 +111,6 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-//Resume Routes
-app.use(express.json());
-//app.use(resumeRoutes); 
 
 // 7. Redis Connection
 (async () => {
@@ -192,9 +194,6 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-
-// Resume Upload + Parsing Route
-//app.use('/resume', authenticate, resumeRoutes);
 
 app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
   const email = req.user?.email;
