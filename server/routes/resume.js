@@ -53,8 +53,18 @@ const uploadResume = async (req, res) => {
       }
 
       try {
+        console.log('Starting resume parsing...');
+        console.log('File info:', {
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          bufferLength: req.file.buffer.length
+        });
+
         // Parse resume from buffer (no file system involved)
-        const resumeData = await parseResumeBuffer(req.file.buffer, req.file.originalname);
+        const resumeData = await parseResumeBuffer(req.file.buffer);
+
+        console.log('Resume parsing completed successfully');
 
         // Store in Supabase
         const { data, error } = await supabase
