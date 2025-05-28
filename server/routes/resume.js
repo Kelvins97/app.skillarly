@@ -102,7 +102,7 @@ const uploadResume = async (req, res) => {
 };
 
 // Define routes
-router.post('/', uploadResume);
+router.post('/', verifyAuthToken , uploadResume);
 
 // Export the router as default
 export default router;
