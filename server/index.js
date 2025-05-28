@@ -40,8 +40,7 @@ const redisClient = createClient({ url: process.env.REDIS_URL });
 
 // Serve uploaded resumes statically -- Resume Routes
 app.use(express.json());
-app.use(resumeRoutes); 
-app.use('/api/resume', resumeRoutes);
+app.use('/', resumeRoutes);
 
 // 3. Enhanced CORS Configuration
 const corsOptions = {
