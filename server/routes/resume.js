@@ -32,15 +32,9 @@ const upload = multer({
   }
 });
 
-// Upload endpoint
+// Upload endpoint - removed auth check since it's handled by middleware
 const uploadResume = async (req, res) => {
   try {
-    // Verify authentication
-    const authResult = verifyAuthToken(req);
-    if (!authResult.success) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     // Handle file upload
     upload.single('resume')(req, res, async (err) => {
       if (err) {
@@ -53,24 +47,17 @@ const uploadResume = async (req, res) => {
       }
 
       try {
-        console.log('Starting resume parsing...');
-        console.log('File info:', {
-          originalname: req.file.originalname,
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-          bufferLength: req.file.buffer.length
-        });
-
         // Parse resume from buffer (no file system involved)
-        const resumeData = await parseResumeBuffer(req.file.buffer);
+        const resumeData = await parseResumeBuffer(req.file.buffer, req.file.originalname);
 
-        console.log('Resume parsing completed successfully');
+        // Get user info from auth middleware (req.user is set by verifyAuthToken)
+        const userId = req.user.id || req.user.email; // Adjust based on your JWT payload
 
         // Store in Supabase
         const { data, error } = await supabase
           .from('resumes')
           .insert({
-            user_id: authResult.userId,
+            user_id: userId,
             filename: req.file.originalname,
             file_size: req.file.size,
             mime_type: req.file.mimetype,
@@ -101,8 +88,8 @@ const uploadResume = async (req, res) => {
   }
 };
 
-// Define routes
-router.post('/', verifyAuthToken, uploadResume);
+// Define routes - NOW using verifyAuthToken as middleware
+router.post('/upload', verifyAuthToken, uploadResume);
 
 // Export the router as default
 export default router;
