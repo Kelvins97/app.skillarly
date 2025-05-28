@@ -4,34 +4,24 @@ import jwt from 'jsonwebtoken';
  * Middleware to verify Bearer JWT token from Authorization header.
  */
 export const verifyAuthToken = (req, res, next) => {
-  console.log('🔍 === AUTH MIDDLEWARE CALLED ===');
-  console.log('Arguments received:', arguments.length);
-  console.log('req exists:', !!req, 'type:', typeof req);
-  console.log('res exists:', !!res, 'type:', typeof res, 'has status method:', typeof res?.status);
-  console.log('next exists:', !!next, 'type:', typeof next);
-  
-  // Check if we have the basic Express objects
-  if (!req || !res) {
-    console.error('❌ Missing req or res objects');
-    throw new Error('Auth middleware: missing req or res');
-  }
-  
-  if (typeof next !== 'function') {
-    console.error('❌ next is not a function, received:', next);
-    console.error('This suggests the middleware chain is broken');
-    // Log the call stack to see where this is coming from
-    console.trace('Call stack:');
+  // Validate middleware parameters
+  if (!req || !res || typeof next !== 'function') {
+    console.error('❌ verifyAuthToken: Invalid middleware parameters');
+    console.error('req:', !!req, 'res:', !!res, 'next type:', typeof next);
     
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error: middleware chain broken'
-    });
+    if (res && typeof res.status === 'function') {
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error: middleware misconfiguration'
+      });
+    }
+    
+    throw new Error('Auth middleware called incorrectly');
   }
 
   const authHeader = req.headers?.authorization;
 
   console.log('🔐 Incoming request - checking auth header...');
-  console.log('Auth header exists:', !!authHeader);
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     console.warn('🚫 Missing or malformed Authorization header');
@@ -42,7 +32,6 @@ export const verifyAuthToken = (req, res, next) => {
   }
 
   const token = authHeader.split(' ')[1];
-  console.log('🔑 Token extracted, length:', token?.length);
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -57,15 +46,7 @@ export const verifyAuthToken = (req, res, next) => {
 
     req.user = decoded;
     console.log(`✅ Authenticated as: ${decoded.email}`);
-    console.log('🔄 Calling next() to continue middleware chain...');
-    
-    // Make sure next is still a function before calling
-    if (typeof next === 'function') {
-      next();
-    } else {
-      console.error('❌ next became non-function between checks!');
-      throw new Error('next function was corrupted');
-    }
+    next();
     
   } catch (error) {
     console.error('❌ JWT verification failed:', error.message);
