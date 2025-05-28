@@ -39,7 +39,8 @@
     "@sparticuz/chromium": "132.0.0",
     "multer": "2.0.0",
     "pdf2pic": "3.2.0",
-    "tesseract.js": "4.1.1"
+    "tesseract.js": "4.1.1",
+    "pdfjs-dist": "5.2.133"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
