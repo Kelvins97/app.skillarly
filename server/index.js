@@ -396,34 +396,43 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
 
 //user-data ✅ user-data using adminSupabase to bypass RLS
 app.get('/user-data', verifyAuthToken, async (req, res) => {
-  const { email } = req.user;
+  const email = req.user.email;
 
   try {
-    const { data, error } = await supabase
+    const { data: user, error } = await supabase
       .from('users')
-      .select(`
-        skills,
-        certifications,
-        companies,
-        education,
-        title,
-        location,
-        parsed_resume
-      `)
+      .select('parsed_resume, resume_uploaded_at, skills, certifications, education, companies, plan')
       .eq('email', email)
       .single();
 
-    if (error) throw error;
+    if (error || !user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
-    res.json({
+    const { data: logs } = await supabase
+      .from('recommendation_logs')
+      .select('recommended_at')
+      .eq('user_id', req.user.id)
+      .order('recommended_at', { ascending: false });
+
+    return res.json({
       success: true,
-      ...data
+      parsed_resume: user.parsed_resume,
+      uploaded_at: user.resume_uploaded_at,
+      skills: user.skills,
+      certifications: user.certifications,
+      education: user.education,
+      companies: user.companies,
+      plan: user.plan,
+      last_recommended_at: logs?.[0]?.recommended_at || null
     });
-  } catch (error) {
-    console.error('❌ Error in /user-data:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to load user data' });
+
+  } catch (err) {
+    console.error('Error in /user-data:', err);
+    res.status(500).json({ success: false, message: 'Internal error' });
   }
 });
+
 
 
 /* Rate limiting middleware
