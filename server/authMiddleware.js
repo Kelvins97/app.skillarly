@@ -4,21 +4,6 @@ import jwt from 'jsonwebtoken';
  * Middleware to verify Bearer JWT token from Authorization header.
  */
 export const verifyAuthToken = (req, res, next) => {
-  // Validate middleware parameters
-  if (!req || !res || typeof next !== 'function') {
-    console.error('❌ verifyAuthToken: Invalid middleware parameters');
-    console.error('req:', !!req, 'res:', !!res, 'next type:', typeof next);
-    
-    if (res && typeof res.status === 'function') {
-      return res.status(500).json({
-        success: false,
-        message: 'Internal server error: middleware misconfiguration'
-      });
-    }
-    
-    throw new Error('Auth middleware called incorrectly');
-  }
-
   const authHeader = req.headers?.authorization;
 
   console.log('🔐 Incoming request - checking auth header...');
