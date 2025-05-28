@@ -1,8 +1,5 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
-import pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.js';
-
-// Configure worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+import { fromBuffer } from 'pdf2pic';
+import Tesseract from 'tesseract.js';
 
 export async function parseResumeBuffer(buffer) {
   try {
@@ -12,15 +9,23 @@ export async function parseResumeBuffer(buffer) {
 
     console.log(`Processing PDF buffer of size: ${buffer.length} bytes`);
     
-    const typedarray = new Uint8Array(buffer);
-    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+    // Convert PDF to images
+    const convert = fromBuffer(buffer, {
+      density: 200,
+      saveFilename: "untitled",
+      savePath: "/tmp",
+      format: "png",
+      width: 2000,
+      height: 2000
+    });
+
+    const results = await convert.bulk(-1);
     let fullText = '';
 
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map(item => item.str).join(' ');
-      fullText += pageText + '\n';
+    // OCR each page
+    for (const result of results) {
+      const { data: { text } } = await Tesseract.recognize(result.buffer, 'eng');
+      fullText += text + '\n';
     }
 
     if (!fullText || fullText.trim().length === 0) {
