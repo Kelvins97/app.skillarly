@@ -1,4 +1,5 @@
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.js';
+import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
+const { getDocument } = pdfjs;
 import mammoth from 'mammoth';
 import path from 'path';
 
