@@ -353,84 +353,78 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
 // Protected Routes (using JWT token)
 // user-info using adminSupabase only
 app.get('/user-info', verifyAuthToken, async (req, res) => {
-  const email = req.user?.email;
-  const { data, error } = await adminSupabase.from('users').select('*').eq('email', email).limit(1);
-  if (error || !data?.length) return res.status(404).json({ success: false });
-  res.json({ success: true, ...data[0] });
+  const { email } = req.user;
+
+  try {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('name, plan, email_notifications')
+      .eq('email', email)
+      .single();
+
+    if (userError) throw userError;
+
+    const { data: resume, error: resumeError } = await supabase
+      .from('resumes')
+      .select('uploaded_at')
+      .eq('user_email', email)
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const { data: lastRec, error: recError } = await supabase
+      .from('recommendation_logs')
+      .select('recommended_at')
+      .eq('user_id', user.id)
+      .order('recommended_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    res.json({
+      success: true,
+      ...user,
+      resume_uploaded_at: resume?.uploaded_at || null,
+      last_recommended_at: lastRec?.recommended_at || null
+    });
+  } catch (error) {
+    console.error('❌ Error in /user-info:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to load user info' });
+  }
 });
+
 
 
 //user-data ✅ user-data using adminSupabase to bypass RLS
 app.get('/user-data', verifyAuthToken, async (req, res) => {
+  const { email } = req.user;
+
   try {
-    const email = req.user?.email;
-
-    if (!email) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized – missing email in token'
-      });
-    }
-
-    console.log('➡️  [GET] /user-data for:', email);
-
-    // Fetch user data from Supabase (admin client bypasses RLS)
-    const { data: users, error: fetchError } = await adminSupabase
+    const { data, error } = await supabase
       .from('users')
-      .select('name, skills, certifications, headline, profilepicture')
+      .select(`
+        skills,
+        certifications,
+        companies,
+        education,
+        title,
+        location,
+        parsed_resume
+      `)
       .eq('email', email)
-      .limit(1);
+      .single();
 
-    if (fetchError) {
-      console.error('❌ Supabase fetch error:', fetchError.message);
-      return res.status(500).json({
-        success: false,
-        message: 'Database error fetching user data'
-      });
-    }
+    if (error) throw error;
 
-    const userData = users?.[0];
-
-    if (!userData) {
-      console.warn('❌ No user data found for:', email);
-      return res.status(404).json({
-        success: false,
-        message: 'User data not found'
-      });
-    }
-
-    console.log('✅ Found user data:', {
-      name: userData.name,
-      skills: userData.skills?.length || 0,
-      certifications: userData.certifications?.length || 0
-    });
-
-    // Static recommendations (for now)
-    const recommendations = [
-      'Consider learning GraphQL for API development',
-      'Your profile would benefit from showcasing more projects',
-      'Adding endorsements would strengthen your profile'
-    ];
-
-    res.status(200).json({
+    res.json({
       success: true,
-      name: userData.name,
-      headline: userData.headline,
-      profilepicture: userData.profilepicture || null,
-      skills: userData.skills || [],
-      certifications: userData.certifications || [],
-      recommendations
+      ...data
     });
-
   } catch (error) {
-    console.error('🔥 Error in /user-data:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching user data',
-      error: error.message
-    });
+    console.error('❌ Error in /user-data:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to load user data' });
   }
 });
+
 
 /* Rate limiting middleware
 app.use('/update-preferences', rateLimiter({
