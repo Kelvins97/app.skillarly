@@ -4,11 +4,16 @@ import jwt from 'jsonwebtoken';
  * Middleware to verify Bearer JWT token from Authorization header.
  */
 export const verifyAuthToken = (req, res, next) => {
+  // Validate middleware context first
+  if (!res || typeof res.status !== 'function' || typeof next !== 'function') {
+    const error = new Error('Auth middleware called without proper Express context');
+    console.error('❌ Middleware setup error:', error.message);
+    throw error; // Fail fast with clear error
+  }
+
   const authHeader = req.headers['authorization'];
 
-  console.log('🔐 Incoming request - checking auth header...');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.warn('🚫 Missing or malformed Authorization header');
     return res.status(401).json({
       success: false,
       message: 'Authorization header with Bearer token required'
@@ -20,8 +25,7 @@ export const verifyAuthToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (!decoded || !decoded.email) {
-      console.warn('⚠️ Token verified but no user email in payload:', decoded);
+    if (!decoded?.email) {
       return res.status(401).json({
         success: false,
         message: 'Invalid token payload: email missing'
@@ -29,12 +33,10 @@ export const verifyAuthToken = (req, res, next) => {
     }
 
     req.user = decoded;
-    console.log(`✅ Authenticated as: ${decoded.email}`);
-    next();
+    next(); // Proceed to next middleware
   } catch (error) {
-    console.error('❌ JWT verification failed:', error.message);
-
     let message = 'Authentication failed';
+    
     if (error.name === 'TokenExpiredError') {
       message = 'Token expired — please log in again';
     } else if (error.name === 'JsonWebTokenError') {
