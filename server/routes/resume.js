@@ -102,7 +102,7 @@ const uploadResume = async (req, res) => {
 };
 
 // Define routes
-router.post('/upload-resume', uploadResume);
+router.post('/', uploadResume);
 
 // Export the router as default
 export default router;
