@@ -40,7 +40,9 @@
     "multer": "2.0.0",
     "pdf2pic": "3.2.0",
     "tesseract.js": "4.1.1",
-    "pdfjs-dist": "2.16.105"
+    "pdfjs-dist": "2.16.105",
+    "mammoth": "1.9.0",
+    "path": "0.12.7"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
