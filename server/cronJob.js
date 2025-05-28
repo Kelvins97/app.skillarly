@@ -63,6 +63,24 @@ cron.schedule('0 7 * * *', async () => {
         user_id: user.id
       });
 
+  //Send email recommendations    
+  if (user.email_notifications) {
+  try {
+    await sendRecommendationEmail({
+      to: user.email,
+      name: user.name,
+      recommendations: {
+        courses: json.courses || [],
+        certifications: json.certifications || [],
+        jobs: json.jobs || []
+      }
+    });
+    console.log(`📧 Email sent to ${user.email}`);
+  } catch (err) {
+    console.warn(`⚠️ Failed to send email to ${user.email}:`, err.message);
+  }
+}
+      
       console.log(`✅ Recommendations updated for ${user.email}`);
     } catch (e) {
       console.error(`❌ Failed for ${user.email}:`, e.message);
