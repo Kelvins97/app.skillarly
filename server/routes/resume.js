@@ -89,7 +89,7 @@ const uploadResume = async (req, res) => {
 };
 
 // Define routes - NOW using verifyAuthToken as middleware
-router.post('/upload', verifyAuthToken, uploadResume);
+router.post('/', verifyAuthToken, uploadResume);
 
 // Export the router as default
 export default router;
