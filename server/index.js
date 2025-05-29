@@ -228,172 +228,46 @@ app.get('/debug-users', async (req, res) => {
   res.json({ users: data });
 });
 
-// Test route to debug Supabase user creation
-app.post('/test-supabase', verifyAuthToken, async (req, res) => {
-  try {
-    const email = req.user.email;
-    
-    console.log('🔍 Testing Supabase connection for email:', email);
-    
-    // 1. Test Supabase connection
-    console.log('Step 1: Testing Supabase connection');
-    const { data: healthData, error: healthError } = await adminSupabase.from('health_check').select('*');
-    
-    if (healthError) {
-      console.error('❌ Supabase connection error:', healthError);
-      return res.status(500).json({ 
-        success: false, 
-        error: 'supabase_connection_error',
-        message: healthError.message 
-      });
-    }
-    
-    console.log('✅ Supabase connection successful');
-    
-    // 2. Check if user exists
-    console.log('Step 2: Checking if user exists');
-    const { data: existingUsers, error: findError } = await adminSupabase
-      .from('users')
-      .select('*')
-      .eq('email', email);
-      
-    if (findError) {
-      console.error('❌ Error checking for existing user:', findError);
-      return res.status(500).json({ 
-        success: false, 
-        error: 'user_check_error',
-        message: findError.message 
-      });
-    }
-    
-    console.log('Existing users found:', existingUsers ? existingUsers.length : 0);
-    
-    // 3. Create user with raw SQL (bypass potential RLS issues)
-    console.log('Step 3: Creating user with raw SQL');
-    const { data: sqlResult, error: sqlError } = await supabase.rpc(
-      'create_user_bypass_rls',
-      { user_email: email }
-    );
-    
-    if (sqlError) {
-      console.error('❌ SQL user creation error:', sqlError);
-    } else {
-      console.log('✅ SQL user creation result:', sqlResult);
-    }
-    
-    // 4. Now try the standard upsert
-    console.log('Step 4: Upserting user with standard method');
-    const { data: upsertResult, error: upsertError } = await adminSupabase
-      .from('users')
-      .upsert([{ email: email }], { 
-        onConflict: 'email',
-        returning: 'representation' 
-      })
-      .select('*');
-      
-    if (upsertError) {
-      console.error('❌ Standard user upsert error:', upsertError);
-    } else {
-      console.log('✅ Standard user upsert result:', upsertResult);
-    }
-    
-    // 5. Auth API direct check (if using auth)
-    console.log('Step 5: Checking Supabase auth');
-    let authUser = null;
-    let authError = null;
-    
-    try {
-      const { data, error } = await supabase.auth.admin.getUserByEmail(email);
-      authUser = data;
-      authError = error;
-    } catch (e) {
-      console.log('Auth admin API not available or error:', e);
-    }
-    
-    // Return all test results
-    return res.json({
-      success: true,
-      email: email,
-      connection: { success: !healthError },
-      existing_user: {
-        found: existingUsers && existingUsers.length > 0,
-        count: existingUsers ? existingUsers.length : 0,
-        data: existingUsers?.[0] ? { id: existingUsers[0].id, email: existingUsers[0].email } : null
-      },
-      sql_creation: {
-        success: !sqlError,
-        error: sqlError ? sqlError.message : null,
-        result: sqlResult
-      },
-      upsert: {
-        success: !upsertError,
-        error: upsertError ? upsertError.message : null,
-        result: upsertResult ? { 
-          count: upsertResult.length,
-          first: upsertResult[0] ? { id: upsertResult[0].id, email: upsertResult[0].email } : null 
-        } : null
-      },
-      auth: {
-        success: !authError,
-        error: authError ? authError.message : null,
-        user: authUser ? { id: authUser.id, email: authUser.email } : null
-      }
-    });
-  } catch (error) {
-    console.error('❌ Test route error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'test_failed',
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-});
-
-// Protected Routes (using JWT token)
-// ✅ OPTIMIZED /user-info - Single query with joins
+// ✅ FIXED /user-info - Separate queries for reliability
 app.get('/user-info', verifyAuthToken, async (req, res) => {
   const { email } = req.user;
 
   try {
-    // Get user with latest resume and recommendation data in one query
-    const { data: userData, error: userError } = await supabase
+    // Get user data first
+    const { data: user, error: userError } = await supabase
       .from('users')
-      .select(`
-        id,
-        name,
-        email,
-        plan,
-        email_notifications,
-        resumes!inner(
-          uploaded_at,
-          id
-        )
-      `)
+      .select('id, name, email, plan, email_notifications')
       .eq('email', email)
-      .order('resumes.uploaded_at', { ascending: false })
-      .limit(1)
       .single();
 
     if (userError) throw userError;
+
+    // Get latest resume - using user_email since that's your current FK
+    const { data: resume, error: resumeError } = await supabase
+      .from('resumes')
+      .select('uploaded_at')
+      .eq('user_email', email)
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     // Get latest recommendation log
     const { data: lastRec, error: recError } = await supabase
       .from('recommendation_logs')
       .select('recommended_at')
-      .eq('user_id', userData.id)
+      .eq('user_id', user.id)
       .order('recommended_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     res.json({
       success: true,
-      id: userData.id,
-      name: userData.name,
-      email: userData.email,
-      plan: userData.plan,
-      email_notifications: userData.email_notifications,
-      resume_uploaded_at: userData.resumes?.[0]?.uploaded_at || null,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      plan: user.plan,
+      email_notifications: user.email_notifications,
+      resume_uploaded_at: resume?.uploaded_at || null,
       last_recommended_at: lastRec?.recommended_at || null
     });
 
@@ -403,12 +277,12 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
   }
 });
 
-// ✅ OPTIMIZED /user-data - Comprehensive data with proper joins
+// ✅ FIXED /user-data - Using current schema
 app.get('/user-data', verifyAuthToken, async (req, res) => {
   const email = req.user.email;
 
   try {
-    // First get user ID
+    // Get user data first
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, plan, skills, certifications, education, companies, parsed_resume')
@@ -419,7 +293,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Get latest resume data (if you want to prioritize resume table over users table)
+    // Get latest resume data using user_email (your current FK)
     const { data: latestResume, error: resumeError } = await supabase
       .from('resumes')
       .select('parsed_data, uploaded_at')
@@ -434,7 +308,7 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
       .select('recommended_at')
       .eq('user_id', user.id)
       .order('recommended_at', { ascending: false })
-      .limit(5); // Get last 5 for analytics
+      .limit(5);
 
     // Merge resume data (prioritize latest resume over user table)
     const resumeData = latestResume?.parsed_data || user.parsed_resume;
@@ -461,6 +335,33 @@ app.get('/user-data', verifyAuthToken, async (req, res) => {
 
   } catch (err) {
     console.error('❌ Error in /user-data:', err);
+    res.status(500).json({ success: false, message: 'Internal error' });
+  }
+});
+
+// 🆕 HELPER: Get user ID by email (for upload process)
+app.get('/user-id', verifyAuthToken, async (req, res) => {
+  const { email } = req.user;
+
+  try {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      user_id: user.id,
+      email: email
+    });
+
+  } catch (err) {
+    console.error('❌ Error in /user-id:', err);
     res.status(500).json({ success: false, message: 'Internal error' });
   }
 });
@@ -534,7 +435,6 @@ app.get('/user-dashboard', verifyAuthToken, async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to load dashboard data' });
   }
 });
-
 
 
 /* Rate limiting middleware
