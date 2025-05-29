@@ -189,46 +189,11 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('/debug-user-check', verifyAuthToken, async (req, res) => {
-  const email = req.user?.email;
-
-  console.log('🧠 JWT Claims:', req.user);
-  console.log('📧 Checking email:', email);
-
-  const { data, error } = await adminSupabase
-    .from('users')
-    .select('*')
-    .eq('email', email);
-
-  if (error) {
-    console.error('❌ Supabase error:', error.message);
-    return res.status(500).json({ success: false, error: error.message });
-  }
-
-  res.json({ 
-    success: true, 
-    matchedUsers: data.length, 
-    email, 
-    data 
-  });
-});
-
 //Dev-seed - manual inputs
 app.use('/', devSeedRoute);
 
-//Test adminSupabase
-app.get('/debug-users', async (req, res) => {
-  const { data, error } = await adminSupabase.from('users').select('*').limit(5);
 
-  if (error) {
-    console.error('❌ adminSupabase select failed:', error.message);
-    return res.status(500).json({ error: 'admin_select_failed', message: error.message });
-  }
-
-  res.json({ users: data });
-});
-
-// ✅ FIXED /user-info - Separate queries for reliability
+// ✅ user-info - Separate queries for reliability
 app.get('/user-info', verifyAuthToken, async (req, res) => {
   const { email } = req.user;
 
@@ -268,7 +233,8 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       plan: user.plan,
       email_notifications: user.email_notifications,
       resume_uploaded_at: resume?.uploaded_at || null,
-      last_recommended_at: lastRec?.recommended_at || null
+      last_recommended_at: lastRec?.recommended_at || null,
+      profilepicture: user.profilepicture, 
     });
 
   } catch (error) {
