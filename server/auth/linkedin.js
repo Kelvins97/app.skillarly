@@ -28,77 +28,58 @@ const generateSecureToken = (user) => {
   );
 };
 
-// Function to upsert user in Supabase
-const upsertUser = async (userData) => {
+// Function to insert user in Supabase if not exists
+const insertUserIfNotExists = async (userData) => {
   try {
-    console.log('Upserting user in Supabase:', userData.email);
+    if (!userData.email) {
+      console.log('No email available, skipping database insertion');
+      return null;
+    }
+
+    console.log('Checking if user exists in Supabase:', userData.email);
     
+    // First check if user exists
+    const { data: existingUser, error: selectError } = await supabase
+      .from('users')
+      .select('id, email')
+      .eq('email', userData.email)
+      .single();
+
+    if (selectError && selectError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      console.error('Error checking existing user:', selectError);
+      throw selectError;
+    }
+
+    if (existingUser) {
+      console.log('User already exists with ID:', existingUser.id);
+      return existingUser;
+    }
+
+    // User doesn't exist, create new record with available data
     const userRecord = {
       email: userData.email,
       name: userData.name || null,
-      // Add other fields from LinkedIn if available
-      profilepicture: userData.picture || null,
-      headline: userData.headline || null,
-      title: userData.title || null,
-      location: userData.location || null,
-      // Set default values for other fields as needed
-      weekly_recommendations: 0,
-      email_notifications: false,
-      plan: 'basic',
-      subscribed: true
+      profilepicture: userData.picture || null
     };
 
-    // Use upsert with conflict resolution on email
+    console.log('Inserting new user:', userRecord);
+    
     const { data, error } = await supabase
       .from('users')
-      .upsert(userRecord, { 
-        onConflict: 'email',
-        ignoreDuplicates: false // This will update existing records
-      })
+      .insert(userRecord)
       .select()
       .single();
 
     if (error) {
-      console.error('Supabase upsert error:', error);
+      console.error('Supabase insert error:', error);
       throw error;
     }
 
-    console.log('User upserted successfully:', data.id);
+    console.log('User inserted successfully:', data.id);
     return data;
   } catch (error) {
-    console.error('Error upserting user:', error);
+    console.error('Error handling user in database:', error);
     throw error;
-  }
-};
-
-// Enhanced function to get additional LinkedIn profile data
-const getLinkedInProfileData = async (accessToken) => {
-  try {
-    console.log('Fetching additional LinkedIn profile data');
-    
-    // Get basic profile information
-    const profileResponse = await fetch('https://api.linkedin.com/v2/people/~:(id,firstName,lastName,headline,pictureInfo,positions)', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json'
-      }
-    });
-
-    let profileData = {};
-    if (profileResponse.ok) {
-      const profile = await profileResponse.json();
-      profileData = {
-        headline: profile.headline,
-        profilePicture: profile.pictureInfo?.displayImageReference?.vectorImage?.artifacts?.[0]?.fileIdentifyingUrlPathSegment,
-        title: profile.positions?.values?.[0]?.title,
-        company: profile.positions?.values?.[0]?.company?.name
-      };
-    }
-
-    return profileData;
-  } catch (error) {
-    console.error('Error fetching LinkedIn profile data:', error);
-    return {};
   }
 };
 
@@ -156,8 +137,8 @@ export const initializeAuth = () => {
       authUrl.searchParams.append('redirect_uri', process.env.LINKEDIN_CALLBACK_URL);
       authUrl.searchParams.append('state', state);
       
-      // Updated scopes to include profile information for database storage
-      const scopes = 'openid profile email r_liteprofile';
+      // Updated scopes to use OpenID Connect
+      const scopes = 'openid profile email';
       authUrl.searchParams.append('scope', scopes);
       console.log('- Requesting scopes:', scopes);
       
@@ -353,25 +334,21 @@ export const initializeAuth = () => {
             const userInfo = await profileResponse.json();
             console.log('UserInfo data:', JSON.stringify(userInfo).substring(0, 100) + '...');
             
-            // Get additional profile data
-            const additionalData = await getLinkedInProfileData(tokenData.access_token);
-            
             // Create user object from userInfo endpoint
             const user = {
               id: userInfo.sub,
               name: userInfo.name || 'LinkedIn User',
               email: userInfo.email,
               accessToken: tokenData.access_token,
-              picture: userInfo.picture,
-              ...additionalData
+              picture: userInfo.picture
             };
             
-            // Insert/update user in Supabase
+            // Insert user in Supabase if not exists
             let dbUser = null;
             if (user.email) {
               try {
-                dbUser = await upsertUser(user);
-                console.log('User saved to database with ID:', dbUser.id);
+                dbUser = await insertUserIfNotExists(user);
+                console.log('User handled in database with ID:', dbUser?.id || 'existing');
               } catch (dbError) {
                 console.error('Database error:', dbError);
                 // Continue with authentication even if DB fails
@@ -425,9 +402,6 @@ export const initializeAuth = () => {
           console.log(`- ${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
         }
         
-        // Get additional profile data from LinkedIn API
-        const additionalData = await getLinkedInProfileData(tokenData.access_token);
-        
         // Create user object from OpenID claims
         // LinkedIn ID token structure may vary - we need to be flexible
         const user = {
@@ -438,8 +412,7 @@ export const initializeAuth = () => {
           // Store additional fields if available
           givenName: decodedToken.given_name || decodedToken.firstName || '',
           familyName: decodedToken.family_name || decodedToken.lastName || '',
-          accessToken: tokenData.access_token,
-          ...additionalData
+          accessToken: tokenData.access_token
         };
         
         // If user ID is missing or empty, try to get it from alternative sources
@@ -464,16 +437,15 @@ export const initializeAuth = () => {
           accessToken: user.accessToken ? '[PRESENT]' : '[MISSING]'
         }));
         
-        // Insert/update user in Supabase
+        // Insert user in Supabase if not exists
         let dbUser = null;
         if (user.email) {
           try {
-            dbUser = await upsertUser(user);
-            console.log('User saved to database with ID:', dbUser.id);
+            dbUser = await insertUserIfNotExists(user);
+            console.log('User handled in database with ID:', dbUser?.id || 'existing');
           } catch (dbError) {
             console.error('Database error:', dbError);
             // Continue with authentication even if DB fails
-            // You might want to handle this differently based on your requirements
           }
         } else {
           console.log('No email available, skipping database insertion');
