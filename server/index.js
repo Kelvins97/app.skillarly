@@ -351,85 +351,187 @@ app.post('/test-supabase', verifyAuthToken, async (req, res) => {
 });
 
 // Protected Routes (using JWT token)
-// user-info using adminSupabase only
+// ✅ OPTIMIZED /user-info - Single query with joins
 app.get('/user-info', verifyAuthToken, async (req, res) => {
   const { email } = req.user;
 
   try {
-    const { data: user, error: userError } = await supabase
+    // Get user with latest resume and recommendation data in one query
+    const { data: userData, error: userError } = await supabase
       .from('users')
-      .select('name, plan, email_notifications')
+      .select(`
+        id,
+        name,
+        email,
+        plan,
+        email_notifications,
+        resumes!inner(
+          uploaded_at,
+          id
+        )
+      `)
       .eq('email', email)
+      .order('resumes.uploaded_at', { ascending: false })
+      .limit(1)
       .single();
 
     if (userError) throw userError;
 
-    const { data: resume, error: resumeError } = await supabase
-      .from('resumes')
-      .select('uploaded_at')
-      .eq('user_email', email)
-      .order('uploaded_at', { ascending: false })
-      .limit(1)
-      .single();
-
+    // Get latest recommendation log
     const { data: lastRec, error: recError } = await supabase
       .from('recommendation_logs')
       .select('recommended_at')
-      .eq('user_id', user.id)
+      .eq('user_id', userData.id)
       .order('recommended_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     res.json({
       success: true,
-      ...user,
-      resume_uploaded_at: resume?.uploaded_at || null,
+      id: userData.id,
+      name: userData.name,
+      email: userData.email,
+      plan: userData.plan,
+      email_notifications: userData.email_notifications,
+      resume_uploaded_at: userData.resumes?.[0]?.uploaded_at || null,
       last_recommended_at: lastRec?.recommended_at || null
     });
+
   } catch (error) {
     console.error('❌ Error in /user-info:', error.message);
     res.status(500).json({ success: false, message: 'Failed to load user info' });
   }
 });
 
-
-
-//user-data ✅ user-data using adminSupabase to bypass RLS
+// ✅ OPTIMIZED /user-data - Comprehensive data with proper joins
 app.get('/user-data', verifyAuthToken, async (req, res) => {
   const email = req.user.email;
 
   try {
-    const { data: user, error } = await supabase
+    // First get user ID
+    const { data: user, error: userError } = await supabase
       .from('users')
-      .select('parsed_resume, resume_uploaded_at, skills, certifications, education, companies, plan')
+      .select('id, plan, skills, certifications, education, companies, parsed_resume')
       .eq('email', email)
       .single();
 
-    if (error || !user) {
+    if (userError || !user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const { data: logs } = await supabase
+    // Get latest resume data (if you want to prioritize resume table over users table)
+    const { data: latestResume, error: resumeError } = await supabase
+      .from('resumes')
+      .select('parsed_data, uploaded_at')
+      .eq('user_email', email)
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Get recommendation logs
+    const { data: recLogs, error: logsError } = await supabase
       .from('recommendation_logs')
       .select('recommended_at')
-      .eq('user_id', req.user.id)
-      .order('recommended_at', { ascending: false });
+      .eq('user_id', user.id)
+      .order('recommended_at', { ascending: false })
+      .limit(5); // Get last 5 for analytics
+
+    // Merge resume data (prioritize latest resume over user table)
+    const resumeData = latestResume?.parsed_data || user.parsed_resume;
 
     return res.json({
       success: true,
-      parsed_resume: user.parsed_resume,
-      uploaded_at: user.resume_uploaded_at,
-      skills: user.skills,
-      certifications: user.certifications,
-      education: user.education,
-      companies: user.companies,
+      user_id: user.id,
       plan: user.plan,
-      last_recommended_at: logs?.[0]?.recommended_at || null
+      
+      // Resume data (prioritize resumes table)
+      parsed_resume: resumeData,
+      uploaded_at: latestResume?.uploaded_at || null,
+      
+      // User profile data (can be from either table)
+      skills: latestResume?.parsed_data?.skills || user.skills,
+      certifications: latestResume?.parsed_data?.certifications || user.certifications,
+      education: latestResume?.parsed_data?.education || user.education,
+      companies: latestResume?.parsed_data?.companies || user.companies,
+      
+      // Recommendation history
+      last_recommended_at: recLogs?.[0]?.recommended_at || null,
+      recommendation_count: recLogs?.length || 0
     });
 
   } catch (err) {
-    console.error('Error in /user-data:', err);
+    console.error('❌ Error in /user-data:', err);
     res.status(500).json({ success: false, message: 'Internal error' });
+  }
+});
+
+// 🆕 BONUS: Combined endpoint for dashboard
+app.get('/user-dashboard', verifyAuthToken, async (req, res) => {
+  const email = req.user.email;
+
+  try {
+    // Single comprehensive query
+    const { data: dashboardData, error } = await supabase
+      .from('users')
+      .select(`
+        id,
+        name,
+        email,
+        plan,
+        email_notifications,
+        skills,
+        certifications,
+        education,
+        companies,
+        resumes (
+          id,
+          uploaded_at,
+          parsed_data
+        ),
+        recommendation_logs (
+          recommended_at
+        )
+      `)
+      .eq('email', email)
+      .order('resumes.uploaded_at', { ascending: false })
+      .order('recommendation_logs.recommended_at', { ascending: false })
+      .single();
+
+    if (error) throw error;
+
+    const latestResume = dashboardData.resumes?.[0];
+    const recentRecommendations = dashboardData.recommendation_logs?.slice(0, 5) || [];
+
+    res.json({
+      success: true,
+      user: {
+        id: dashboardData.id,
+        name: dashboardData.name,
+        email: dashboardData.email,
+        plan: dashboardData.plan,
+        email_notifications: dashboardData.email_notifications
+      },
+      resume: {
+        uploaded_at: latestResume?.uploaded_at || null,
+        has_resume: !!latestResume,
+        parsed_data: latestResume?.parsed_data || null
+      },
+      profile: {
+        skills: latestResume?.parsed_data?.skills || dashboardData.skills,
+        certifications: latestResume?.parsed_data?.certifications || dashboardData.certifications,
+        education: latestResume?.parsed_data?.education || dashboardData.education,
+        companies: latestResume?.parsed_data?.companies || dashboardData.companies
+      },
+      recommendations: {
+        last_recommended_at: recentRecommendations[0]?.recommended_at || null,
+        total_count: recentRecommendations.length,
+        recent_history: recentRecommendations.map(log => log.recommended_at)
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /user-dashboard:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to load dashboard data' });
   }
 });
 
