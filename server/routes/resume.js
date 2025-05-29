@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { parseResumeBuffer } from '../parseResume.js';
-import { supabase } from '../supabase.js';
+import { supabase } from '../supabase.js'; // This should be your admin client
 import path from 'path';
 import { verifyAuthToken } from '../authMiddleware.js';
 
@@ -74,7 +74,7 @@ const uploadResume = async (req, res) => {
 
         console.log(`Found user ID: ${user.id} for email: ${userEmail}`);
 
-        // Store in Supabase using user_email (your current FK)
+        // Store in Supabase using admin client to bypass RLS
         const { data, error } = await supabase
           .from('resumes')
           .insert({
@@ -98,7 +98,7 @@ const uploadResume = async (req, res) => {
 
         console.log(`✅ Resume saved with ID: ${data.id}`);
 
-        // Optional: Update users table with latest resume info
+        // Optional: Update users table with latest resume info using admin client
         const { error: updateError } = await supabase
           .from('users')
           .update({
