@@ -234,7 +234,7 @@ app.get('/user-info', verifyAuthToken, async (req, res) => {
       email_notifications: user.email_notifications,
       resume_uploaded_at: resume?.uploaded_at || null,
       last_recommended_at: lastRec?.recommended_at || null,
-      profilepicture: user.profilepicture, 
+      profilepicture: user.profilepicture 
     });
 
   } catch (error) {
